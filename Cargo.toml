@@ -1,0 +1,37 @@
+[package]
+name = "matrix-ui-serializable"
+version = "0.1.0"
+authors = ["IT-ess"]
+description = "Opinionated abstraction of the matrix-sdk crate with serializable structs"
+edition = "2024"
+repository = "https://github.com/IT-ess/matrix-ui-serializable"
+readme = "README.md"
+keywords = ["matrix", "matrix-rust-sdk", "communication"]
+license = "Apache-2.0"
+
+[dependencies]
+serde = "1.0"
+serde_json = "1.0.142"
+anyhow = "1.0.98"
+matrix-sdk = { version = "0.13.0", default-features = false, features = [
+    "anyhow",
+    "bundled-sqlite",
+    "rustls-tls",
+    "e2e-encryption",
+    "automatic-room-key-forwarding",
+] }
+matrix-sdk-ui = { version = "0.13.0", default-features = false, features = [
+    "rustls-tls",
+] }
+futures-util = "0.3.31"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
+futures = "0.3.31"
+eyeball = "0.8.8"
+crossbeam-channel = "0.5.15"
+bitflags = "2.9.1"
+crossbeam-queue = "0.3.12"
+htmlize = "1.0.6"
+linkify = "0.10.0"
+rangemap = "1.5.1"
+indexmap = { version = "2.9.0", features = ["serde"] }
+unicode-segmentation = "1.12.0"
