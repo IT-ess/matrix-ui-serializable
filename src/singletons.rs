@@ -124,14 +124,11 @@ pub fn get_event_bridge<'a>() -> anyhow::Result<&'a EventBridge> {
 // Adapter -> lib communication
 
 pub static ROOM_CREATED_RECEIVER: OnceLock<
-    tokio::sync::Mutex<mpsc::UnboundedReceiver<MatrixRoomStoreCreatedRequest>>,
+    tokio::sync::Mutex<mpsc::Receiver<MatrixRoomStoreCreatedRequest>>,
 > = OnceLock::new();
 
 pub async fn get_room_created_receiver_lock<'a>() -> anyhow::Result<
-    tokio::sync::MutexGuard<
-        'a,
-        tokio::sync::mpsc::UnboundedReceiver<MatrixRoomStoreCreatedRequest>,
-    >,
+    tokio::sync::MutexGuard<'a, tokio::sync::mpsc::Receiver<MatrixRoomStoreCreatedRequest>>,
 > {
     let recv = ROOM_CREATED_RECEIVER
         .get()
@@ -140,11 +137,11 @@ pub async fn get_room_created_receiver_lock<'a>() -> anyhow::Result<
 }
 
 pub static VERIFICATION_RESPONSE_RECEIVER: OnceLock<
-    tokio::sync::Mutex<mpsc::UnboundedReceiver<MatrixVerificationResponse>>,
+    tokio::sync::Mutex<mpsc::Receiver<MatrixVerificationResponse>>,
 > = OnceLock::new();
 
 pub async fn get_verification_response_receiver_lock<'a>() -> anyhow::Result<
-    tokio::sync::MutexGuard<'a, tokio::sync::mpsc::UnboundedReceiver<MatrixVerificationResponse>>,
+    tokio::sync::MutexGuard<'a, tokio::sync::mpsc::Receiver<MatrixVerificationResponse>>,
 > {
     let recv = VERIFICATION_RESPONSE_RECEIVER
         .get()

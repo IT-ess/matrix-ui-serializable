@@ -68,6 +68,16 @@ pub struct MobilePushNotificationConfig {
     app_id: String,
 }
 
+impl MobilePushNotificationConfig {
+    pub fn new(token: String, sygnal_gateway_url: String, app_id: String) -> Self {
+        Self {
+            token,
+            sygnal_gateway_url,
+            app_id,
+        }
+    }
+}
+
 pub async fn register_mobile_push_notifications(
     client: &Client,
     config: MobilePushNotificationConfig,

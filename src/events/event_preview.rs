@@ -144,7 +144,7 @@ pub fn text_preview_of_timeline_item(
 }
 
 /// Returns the plaintext `body` of the given timeline event.
-pub fn plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> String {
+pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> String {
     match event_tl_item.content() {
         TimelineItemContent::MsgLike(m) => {
             let message = m.clone();

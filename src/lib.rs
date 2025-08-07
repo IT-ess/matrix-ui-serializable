@@ -1,10 +1,7 @@
 use std::{path::PathBuf, sync::Arc, thread, time::Duration};
 
 use serde::{Serialize, ser::Serializer};
-use tokio::{
-    runtime::Handle,
-    sync::{broadcast, mpsc},
-};
+use tokio::{runtime::Handle, sync::broadcast};
 
 use crate::{
     init::{
@@ -23,10 +20,9 @@ use crate::{
     requests::MatrixRequest,
     room::rooms_list::{RoomsCollectionStatus, RoomsListUpdate, enqueue_rooms_list_update},
     singletons::{
-        CLIENT, EVENT_BRIDGE, LOGIN_STORE_READY, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
+        CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
         VERIFICATION_RESPONSE_RECEIVER,
     },
-    stores::login_store::{FrontendVerificationState, LoginState},
 };
 
 pub mod commands;
@@ -63,9 +59,23 @@ impl Serialize for Error {
 }
 
 pub struct EventReceivers {
-    room_created_receiver: mpsc::UnboundedReceiver<MatrixRoomStoreCreatedRequest>,
-    verification_response_receiver: mpsc::UnboundedReceiver<MatrixVerificationResponse>,
-    room_update_receiver: mpsc::UnboundedReceiver<MatrixUpdateCurrentActiveRoom>,
+    room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
+    verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
+    room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
+}
+
+impl EventReceivers {
+    pub fn new(
+        room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
+        verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
+        room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
+    ) -> Self {
+        Self {
+            room_created_receiver,
+            verification_response_receiver,
+            room_update_receiver,
+        }
+    }
 }
 
 /// The required configuration for this lib. Adapters must implement updaters and event_receivers.
@@ -81,6 +91,24 @@ pub struct LibConfig {
     session_option: Option<String>,
     /// A PathBuf to the temporary dir of the app
     temp_dir: PathBuf,
+}
+
+impl LibConfig {
+    pub fn new(
+        updaters: Box<dyn StateUpdater>,
+        mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
+        event_receivers: EventReceivers,
+        session_option: Option<String>,
+        temp_dir: PathBuf,
+    ) -> Self {
+        Self {
+            updaters,
+            mobile_push_notifications_config,
+            event_receivers,
+            session_option,
+            temp_dir,
+        }
+    }
 }
 
 pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
@@ -246,3 +274,17 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     // Return broadcast receiver for the adapter to forward outgoing events
     broadcast_receiver
 }
+
+// Re-exports
+
+pub use init::login::MatrixClientConfig;
+pub use matrix_sdk::media::MediaRequestParameters;
+pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
+pub use models::*;
+pub use room::room_screen::RoomScreen;
+pub use room::rooms_list::RoomsList;
+pub use singletons::LOGIN_STORE_READY;
+pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};
+pub use tokio::sync::mpsc;
+pub use tokio::sync::oneshot;
+pub use user::user_profile::UserProfileMap;

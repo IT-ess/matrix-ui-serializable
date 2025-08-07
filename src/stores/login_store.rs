@@ -13,6 +13,17 @@ pub enum LoginState {
     LoggedIn,
 }
 
+impl LoginState {
+    pub fn to_camel_case(&self) -> String {
+        match self {
+            LoginState::Initiating => "initiating".to_string(),
+            LoginState::Restored => "restored".to_string(),
+            LoginState::AwaitingForLogin => "awaitingForLogin".to_string(),
+            LoginState::LoggedIn => "loggedIn".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FrontendVerificationState(VerificationState);
 
@@ -35,7 +46,7 @@ impl FrontendVerificationState {
         Self(state)
     }
 
-    fn to_camel_case(&self) -> &str {
+    pub fn to_camel_case(&self) -> &str {
         match self {
             FrontendVerificationState(VerificationState::Unknown) => "unknown",
             FrontendVerificationState(VerificationState::Verified) => "verified",
@@ -78,7 +89,7 @@ impl FrontendSyncServiceState {
         Self(state)
     }
 
-    fn to_camel_case(&self) -> &str {
+    pub fn to_camel_case(&self) -> &str {
         match self {
             FrontendSyncServiceState(sync_service::State::Error) => "error",
             FrontendSyncServiceState(sync_service::State::Idle) => "idle",

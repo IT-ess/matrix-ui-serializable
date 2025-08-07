@@ -59,10 +59,12 @@ impl RoomScreen {
     }
 
     fn update_frontend_state(&self) {
-        self.state_updaters.update_room(self).expect(&format!(
-            "Couldn't update frontend store for room {:?}",
-            self.room_name,
-        ))
+        self.state_updaters
+            .update_room(self, self.room_id.as_str())
+            .expect(&format!(
+                "Couldn't update frontend store for room {:?}",
+                self.room_name,
+            ))
     }
 
     /// Processes all pending background updates to the currently-shown timeline.

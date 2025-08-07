@@ -1,4 +1,4 @@
-use tokio::sync::broadcast;
+pub use tokio::sync::broadcast;
 
 use crate::models::requests::EmitEvent;
 

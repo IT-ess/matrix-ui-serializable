@@ -109,8 +109,8 @@ impl ToastNotificationRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OsNotificationRequest {
-    summary: String,
-    body: Option<String>,
+    pub summary: String,
+    pub body: Option<String>,
 }
 
 impl OsNotificationRequest {

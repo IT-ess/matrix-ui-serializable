@@ -52,7 +52,7 @@ use crate::{
 pub async fn async_main_loop(
     client: Client,
     state_updaters: Arc<Box<dyn StateUpdater>>,
-    room_update_receiver: mpsc::UnboundedReceiver<MatrixUpdateCurrentActiveRoom>,
+    room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
 ) -> anyhow::Result<()> {
     let logged_in_user_id = client
         .user_id()
@@ -960,7 +960,7 @@ pub async fn async_worker(
 /// but maybe I should handle this as every other action
 pub async fn ui_worker(
     state_updaters: Arc<Box<dyn StateUpdater>>,
-    mut room_update_receiver: mpsc::UnboundedReceiver<MatrixUpdateCurrentActiveRoom>,
+    mut room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
 ) -> anyhow::Result<()> {
     let rooms_list = Arc::new(Mutex::new(RoomsList::new(state_updaters.clone())));
 
