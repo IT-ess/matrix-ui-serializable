@@ -2014,9 +2014,11 @@ dependencies = [
  "linkify",
  "matrix-sdk",
  "matrix-sdk-ui",
+ "rand 0.9.2",
  "rangemap",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
  "tokio",
  "unicode-segmentation",
 ]
