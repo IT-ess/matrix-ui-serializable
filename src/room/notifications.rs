@@ -17,8 +17,8 @@ use matrix_sdk::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    models::requests::{EmitEvent, OsNotificationRequest, ToastNotificationRequest},
-    singletons::{UIUpdateMessage, broadcast_event, get_event_bridge},
+    init::singletons::{UIUpdateMessage, broadcast_event, get_event_bridge},
+    models::events::{EmitEvent, OsNotificationRequest, ToastNotificationRequest},
 };
 
 //

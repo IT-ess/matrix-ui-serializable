@@ -5,11 +5,11 @@ use crate::{
         events::get_latest_event_details,
         timeline::{TimelineRequestSender, TimelineUpdate, timeline_subscriber_handler},
     },
+    init::singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, TOMBSTONED_ROOMS, get_client},
     room::{
         invited_room::{InvitedRoomInfo, InviterInfo},
         rooms_list::{JoinedRoomInfo, RoomsListUpdate, enqueue_rooms_list_update},
     },
-    singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, TOMBSTONED_ROOMS, get_client},
 };
 use matrix_sdk::{RoomState, event_handler::EventHandlerDropGuard, ruma::OwnedRoomId};
 use matrix_sdk_ui::{

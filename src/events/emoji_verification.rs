@@ -11,8 +11,8 @@ use matrix_sdk::{
 use tokio::runtime::Handle;
 
 use crate::{
-    models::requests::{EmitEvent, MatrixVerificationEmojis},
-    singletons::{get_client, get_event_bridge, get_verification_response_receiver_lock},
+    init::singletons::{get_client, get_event_bridge, get_verification_response_receiver_lock},
+    models::events::{EmitEvent, MatrixVerificationEmojis},
 };
 
 async fn wait_for_confirmation(sas: SasVerification, emoji: [Emoji; 7]) -> anyhow::Result<()> {

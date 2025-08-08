@@ -1,6 +1,6 @@
 pub use tokio::sync::broadcast;
 
-use crate::models::requests::EmitEvent;
+use crate::models::events::EmitEvent;
 
 #[derive(Debug)]
 pub struct EventBridge {

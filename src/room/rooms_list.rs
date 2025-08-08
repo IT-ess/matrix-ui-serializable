@@ -21,13 +21,13 @@ use tokio::{
 };
 
 use crate::{
+    init::singletons::{UIUpdateMessage, broadcast_event},
     models::state_updater::StateUpdater,
     room::{
         invited_room::InvitedRoomInfo,
         joined_room::UnreadMessageCount,
         room_filter::{FilterableRoom, RoomDisplayFilterBuilder, RoomFilterCriteria, SortFn},
     },
-    singletons::{UIUpdateMessage, broadcast_event},
     stores::room_store::send_room_creation_request_and_await_response,
 };
 
@@ -434,7 +434,7 @@ impl RoomsList {
         self.current_active_room = updated_current_active_room;
         match self.current_active_room.clone() {
             Some(id) => {
-                let mut ui_subscriber = crate::singletons::subscribe_to_events()
+                let mut ui_subscriber = crate::init::singletons::subscribe_to_events()
                     .expect("Couldn't get UI subscriber event");
                 let (tx, mut rx) = oneshot::channel::<()>();
                 self.current_active_room_killer = Some(tx);

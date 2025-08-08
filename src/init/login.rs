@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use rand::{Rng, distr::Alphanumeric, rng};
 use serde::{Deserialize, Serialize};
 
-use crate::singletons::CLIENT;
+use crate::init::singletons::CLIENT;
 
 use super::session::ClientSession;
 

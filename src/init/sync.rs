@@ -12,12 +12,12 @@ use matrix_sdk_ui::{
 use tokio::runtime::Handle;
 
 use crate::{
+    init::singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, SYNC_SERVICE},
     models::state_updater::StateUpdater,
     room::{
         joined_room::{RoomListServiceRoomInfo, add_new_room, remove_room, update_room},
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update, handle_rooms_loading_state},
     },
-    singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, SYNC_SERVICE},
     stores::login_store::FrontendSyncServiceState,
 };
 

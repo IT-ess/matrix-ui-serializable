@@ -1,6 +1,6 @@
 use crate::{
-    models::requests::{EmitEvent, MatrixRoomStoreCreateRequest},
-    singletons::{get_event_bridge, get_room_created_receiver_lock},
+    init::singletons::{get_event_bridge, get_room_created_receiver_lock},
+    models::events::{EmitEvent, MatrixRoomStoreCreateRequest},
 };
 
 pub async fn send_room_creation_request_and_await_response(id: &str) -> anyhow::Result<()> {

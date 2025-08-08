@@ -2,10 +2,9 @@ use std::path::PathBuf;
 
 use crate::{
     init::login::{LoginRequest, MatrixClientConfig},
-    models::device::FrontendDevice,
-    notifications::MobilePushNotificationConfig,
-    requests::MatrixRequest,
-    singletons::get_client,
+    init::singletons::get_client,
+    models::{async_requests::MatrixRequest, device::FrontendDevice},
+    room::notifications::MobilePushNotificationConfig,
     utils::guess_device_type,
 };
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId, UserId};
@@ -24,7 +23,7 @@ pub async fn login_and_create_new_session(
 }
 
 pub fn submit_async_request(request: MatrixRequest) -> crate::Result<()> {
-    crate::requests::submit_async_request(request);
+    crate::models::async_requests::submit_async_request(request);
     Ok(())
 }
 

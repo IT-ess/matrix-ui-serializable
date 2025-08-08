@@ -23,21 +23,21 @@ use tokio::{
 
 use crate::{
     events::timeline::{PaginationDirection, TimelineUpdate},
+    init::singletons::{ALL_JOINED_ROOMS, CLIENT, UIUpdateMessage, broadcast_event},
     models::{
-        requests::{
+        async_requests::{MatrixRequest, submit_async_request},
+        events::{
             MatrixUpdateCurrentActiveRoom, ToastNotificationRequest, ToastNotificationVariant,
         },
         state_updater::StateUpdater,
     },
-    notifications::{enqueue_toast_notification, process_toast_notifications},
-    requests::{MatrixRequest, submit_async_request},
     room::{
         joined_room::UnreadMessageCount,
+        notifications::{enqueue_toast_notification, process_toast_notifications},
         rooms_list::{
             RoomsCollectionStatus, RoomsList, RoomsListUpdate, enqueue_rooms_list_update,
         },
     },
-    singletons::{ALL_JOINED_ROOMS, CLIENT, UIUpdateMessage, broadcast_event},
     user::{
         user_power_level::UserPowerLevels,
         user_profile::{
@@ -966,7 +966,7 @@ pub async fn ui_worker(
 
     // create UI subscriber
     let mut ui_subscriber = debounce_broadcast(
-        crate::singletons::subscribe_to_events().expect("Couldn't get UI subscriber event"),
+        crate::init::singletons::subscribe_to_events().expect("Couldn't get UI subscriber event"),
         Duration::from_millis(200),
     );
 

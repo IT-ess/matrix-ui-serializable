@@ -6,10 +6,9 @@ use tokio::time::{Duration, sleep};
 use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
-use super::{
-    requests::{MatrixRequest, submit_async_request},
-    singletons::CLIENT,
-};
+use crate::models::async_requests::{MatrixRequest, submit_async_request};
+
+use super::init::singletons::CLIENT;
 
 /// Returns the sender's display name if available.
 ///
@@ -25,7 +24,6 @@ pub fn get_or_fetch_event_sender(
         TimelineDetails::Unavailable => {
             if let Some(room_id) = room_id {
                 if let Some(event_id) = event_tl_item.event_id() {
-                    // TODO: handle
                     submit_async_request(MatrixRequest::FetchDetailsForEvent {
                         room_id: room_id.clone(),
                         event_id: event_id.to_owned(),

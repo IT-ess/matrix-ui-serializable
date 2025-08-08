@@ -27,13 +27,13 @@ use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use tokio::sync::watch;
 
 use crate::{
-    requests::{MatrixRequest, submit_async_request},
+    init::singletons::{ALL_JOINED_ROOMS, LOG_TIMELINE_DIFFS, UIUpdateMessage, broadcast_event},
+    models::async_requests::{MatrixRequest, submit_async_request},
     room::{
         frontend_events::events_dto::{FrontendTimelineItem, to_frontend_timeline_item},
         joined_room::UnreadMessageCount,
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
-    singletons::{ALL_JOINED_ROOMS, LOG_TIMELINE_DIFFS, UIUpdateMessage, broadcast_event},
     user::user_power_level::UserPowerLevels,
     utils::current_user_id,
 };

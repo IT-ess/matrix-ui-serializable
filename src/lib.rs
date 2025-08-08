@@ -4,24 +4,26 @@ use serde::{Serialize, ser::Serializer};
 use tokio::{runtime::Handle, sync::broadcast};
 
 use crate::{
+    init::singletons::{
+        CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
+        VERIFICATION_RESPONSE_RECEIVER,
+    },
     init::{
         session::try_restore_session_to_state,
         workers::{async_main_loop, async_worker},
     },
     models::{
+        async_requests::MatrixRequest,
         event_bridge::EventBridge,
-        requests::{
+        events::{
             EmitEvent, MatrixRoomStoreCreatedRequest, MatrixUpdateCurrentActiveRoom,
             MatrixVerificationResponse, ToastNotificationRequest, ToastNotificationVariant,
         },
         state_updater::StateUpdater,
     },
-    notifications::{MobilePushNotificationConfig, enqueue_toast_notification},
-    requests::MatrixRequest,
-    room::rooms_list::{RoomsCollectionStatus, RoomsListUpdate, enqueue_rooms_list_update},
-    singletons::{
-        CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
-        VERIFICATION_RESPONSE_RECEIVER,
+    room::{
+        notifications::{MobilePushNotificationConfig, enqueue_toast_notification},
+        rooms_list::{RoomsCollectionStatus, RoomsListUpdate, enqueue_rooms_list_update},
     },
 };
 
@@ -29,10 +31,7 @@ pub mod commands;
 pub(crate) mod events;
 pub(crate) mod init;
 pub mod models;
-pub mod notifications;
-pub mod requests;
 pub(crate) mod room;
-pub(crate) mod singletons;
 pub mod stores;
 pub(crate) mod user;
 pub(crate) mod utils;
@@ -83,12 +82,12 @@ pub struct LibConfig {
     /// The functions that will be in charge of updating the frontend states / stores
     /// from the backend state
     updaters: Box<dyn StateUpdater>,
-    /// The required configuration for mobile push notifications to work
-    mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
     /// To listen to events coming from the frontend, we use channels.
     event_receivers: EventReceivers,
     /// The session option stored (or not) by the adapter. It is serialized.
     session_option: Option<String>,
+    /// The required configuration for mobile push notifications to work
+    mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
     /// A PathBuf to the temporary dir of the app
     temp_dir: PathBuf,
 }
@@ -132,7 +131,7 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .expect("Couldn't set the verification response receiver");
 
     // Create a channel to be used between UI thread(s) and the async worker thread.
-    crate::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster"); // TODO: adapt capacity if needed
+    crate::init::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster"); // TODO: adapt capacity if needed
 
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<MatrixRequest>();
     REQUEST_SENDER
@@ -204,7 +203,7 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         });
 
         let mut ui_event_receiver =
-            crate::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
+            crate::init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
 
         // Spawn the actual async worker thread.
         let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));
@@ -278,12 +277,12 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 // Re-exports
 
 pub use init::login::MatrixClientConfig;
+pub use init::singletons::LOGIN_STORE_READY;
 pub use matrix_sdk::media::MediaRequestParameters;
 pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
-pub use models::*;
+pub use models::{event_bridge, state_updater};
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
-pub use singletons::LOGIN_STORE_READY;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};
 pub use tokio::sync::mpsc;
 pub use tokio::sync::oneshot;

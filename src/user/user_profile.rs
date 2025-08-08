@@ -11,12 +11,12 @@ use matrix_sdk::{
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use crate::{
-    models::state_updater::StateUpdater,
-    requests::{MatrixRequest, submit_async_request},
+use crate::models::{
+    async_requests::{MatrixRequest, submit_async_request},
+    state_updater::StateUpdater,
 };
 
-use crate::singletons::{UIUpdateMessage, broadcast_event};
+use crate::init::singletons::{UIUpdateMessage, broadcast_event};
 
 /// Information retrieved about a user: their displayable name, ID, and known avatar state.
 #[derive(Debug, Clone, Serialize)]

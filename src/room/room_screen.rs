@@ -10,8 +10,10 @@ use crate::{
         PaginationDirection, TIMELINE_STATES, TimelineUiState, TimelineUpdate,
         take_timeline_endpoints,
     },
-    models::state_updater::StateUpdater,
-    requests::{MatrixRequest, submit_async_request},
+    models::{
+        async_requests::{MatrixRequest, submit_async_request},
+        state_updater::StateUpdater,
+    },
     user::user_power_level::UserPowerLevels,
     utils::room_name_or_id,
 };

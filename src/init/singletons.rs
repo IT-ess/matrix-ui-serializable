@@ -14,13 +14,12 @@ use tokio::sync::{
 
 use crate::{
     models::{
+        async_requests::MatrixRequest,
         event_bridge::EventBridge,
-        requests::{MatrixRoomStoreCreatedRequest, MatrixVerificationResponse},
+        events::{MatrixRoomStoreCreatedRequest, MatrixVerificationResponse},
     },
     room::joined_room::JoinedRoomDetails,
 };
-
-use super::requests::MatrixRequest;
 
 /// The sender used by [`submit_async_request`] to send requests to the async worker thread.
 /// Currently there is only one, but it can be cloned if we need more concurrent senders.

@@ -10,8 +10,8 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use crate::{
     events::events::{self, add_event_handlers},
     init::login,
-    notifications::{MobilePushNotificationConfig, register_notifications},
-    singletons::CLIENT,
+    init::singletons::CLIENT,
+    room::notifications::{MobilePushNotificationConfig, register_notifications},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
