@@ -31,7 +31,7 @@ pub struct UserProfile {
 }
 impl UserProfile {
     /// Returns the user's displayable name, using the user ID as a fallback.
-    pub fn displayable_name(&self) -> &str {
+    pub fn _displayable_name(&self) -> &str {
         if let Some(un) = self.username.as_ref() {
             if !un.is_empty() {
                 return un.as_str();
@@ -57,7 +57,7 @@ pub enum UserProfileUpdate {
     Full {
         new_profile: UserProfile,
         room_id: OwnedRoomId,
-        room_member: RoomMember,
+        _room_member: RoomMember,
     },
     /// An update to the user's room membership info only, without any profile changes.
     RoomMemberOnly {
@@ -75,7 +75,7 @@ impl UserProfileUpdate {
             UserProfileUpdate::Full {
                 new_profile,
                 room_id,
-                room_member: _,
+                _room_member: _,
             } => match cache.entry(new_profile.user_id.clone()) {
                 Entry::Occupied(mut entry) => match entry.get_mut() {
                     e @ UserProfileCacheEntry::Requested => {

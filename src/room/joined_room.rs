@@ -95,7 +95,7 @@ impl From<matrix_sdk::Room> for RoomListServiceRoomInfo {
 #[derive(Clone, Debug)]
 pub enum UnreadMessageCount {
     /// There are unread messages, but we do not know how many.
-    Unknown,
+    _Unknown,
     /// There are unread messages, and we know exactly how many.
     Known(u64),
 }
@@ -383,6 +383,6 @@ pub fn remove_room(room: &RoomListServiceRoomInfo) {
     ALL_JOINED_ROOMS.lock().unwrap().remove(&room.room_id);
     enqueue_rooms_list_update(RoomsListUpdate::RemoveRoom {
         room_id: room.room_id.clone(),
-        new_state: room.room_state,
+        _new_state: room.room_state,
     });
 }

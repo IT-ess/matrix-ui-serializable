@@ -79,7 +79,7 @@ pub enum RoomsListUpdate {
     RemoveRoom {
         room_id: OwnedRoomId,
         /// The new state of the room (which caused its removal).
-        new_state: RoomState,
+        _new_state: RoomState,
     },
     /// Update the tags for the given room.
     Tags {
@@ -327,7 +327,7 @@ impl RoomsList {
                 } => {
                     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
                         (room.num_unread_messages, room.num_unread_mentions) = match count {
-                            UnreadMessageCount::Unknown => (0, 0),
+                            UnreadMessageCount::_Unknown => (0, 0),
                             UnreadMessageCount::Known(count) => (count, unread_mentions),
                         };
                     } else {
@@ -367,7 +367,7 @@ impl RoomsList {
                 }
                 RoomsListUpdate::RemoveRoom {
                     room_id,
-                    new_state: _,
+                    _new_state: _,
                 } => {
                     if let Some(_removed) = self.all_joined_rooms.remove(&room_id) {
                         println!("Removed room {room_id} from the list of all joined rooms");
@@ -531,9 +531,9 @@ impl RoomsList {
         // Create a new filter function based on the given keywords
         // and store it in this RoomsList such that we can apply it to newly-added rooms.
         let (filter, sort_fn) = RoomDisplayFilterBuilder::new()
-            .set_keywords(keywords.to_owned())
-            .set_filter_criteria(RoomFilterCriteria::All)
-            .build();
+            ._set_keywords(keywords.to_owned())
+            ._set_filter_criteria(RoomFilterCriteria::All)
+            ._build();
         self.display_filter = filter;
 
         /// An inner function that generates a sorted, filtered list of rooms to display.

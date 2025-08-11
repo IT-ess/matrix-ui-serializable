@@ -94,9 +94,6 @@ pub enum TimelineUpdate {
         /// and thus must be removed from any caches of drawn items in the timeline.
         /// Any items outside of this range are assumed to be unchanged and need not be redrawn.
         changed_indices: Range<usize>,
-        /// An optimization that informs the UI whether the changes to the timeline
-        /// resulted in new items being *appended to the end* of the timeline.
-        is_append: bool,
         /// Whether to clear the entire cache of drawn items in the timeline.
         /// This supersedes `index_of_first_change` and is used when the entire timeline is being redrawn.
         clear_cache: bool,
@@ -586,7 +583,6 @@ pub async fn timeline_subscriber_handler(
                         new_items: timeline_items.clone(),
                         changed_indices,
                         clear_cache,
-                        is_append,
                     }).expect("Error: timeline update sender couldn't send update with new items!");
 
                     // We must send this update *after* the actual NewItems update,

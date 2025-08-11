@@ -394,7 +394,7 @@ pub async fn async_worker(
                                         avatar_url: room_member.avatar_url().map(|u| u.to_owned()),
                                     },
                                     room_id: room_id.to_owned(),
-                                    room_member,
+                                    _room_member: room_member,
                                 });
                             } else {
                                 println!("User profile request: user {user_id} was not a member of room {room_id}");

@@ -71,12 +71,8 @@ impl RoomScreen {
 
     /// Processes all pending background updates to the currently-shown timeline.
     pub fn process_timeline_updates(&mut self) {
-        // let top_space = self.view(id!(top_space));
-        // let jump_to_bottom = self.jump_to_bottom_button(id!(jump_to_bottom));
-        // let curr_first_id = portal_list.first_id();
         let curr_first_id: usize = 0; // TODO: replace this dummy value
 
-        // let ui = self.widget_uid();
         let Some(tl) = self.tl_state.as_mut() else {
             return;
         };
@@ -92,19 +88,13 @@ impl RoomScreen {
                     tl.content_drawn_since_last_update.clear();
                     tl.profile_drawn_since_last_update.clear();
                     tl.fully_paginated = false;
-                    // Set the portal list to the very bottom of the timeline.
-                    // portal_list.set_first_id_and_scroll(initial_items.len().saturating_sub(1), 0.0);
-                    // portal_list.set_tail_range(true);
-                    // jump_to_bottom.update_visibility(cx, true);
 
-                    // update
                     tl.items = initial_items;
                     done_loading = true;
                 }
                 TimelineUpdate::NewItems {
                     new_items,
                     changed_indices,
-                    is_append: _,
                     clear_cache,
                 } => {
                     if new_items.is_empty() {
@@ -120,33 +110,7 @@ impl RoomScreen {
                             // or paginate backwards until we find them (only if we are close the end of the timeline).
                             should_continue_backwards_pagination = true;
                         }
-
-                        // If the bottom of the timeline (the last event) is visible, then we should
-                        // set the timeline to live mode.
-                        // If the bottom of the timeline is *not* visible, then we should
-                        // set the timeline to Focused mode.
-
-                        // TODO: Save the event IDs of the top 3 items before we apply this update,
-                        //       which indicates this timeline is in the process of being restored,
-                        //       such that we can jump back to that position later after applying this update.
-
-                        // TODO: here we need to re-build the timeline via TimelineBuilder
-                        //       and set the TimelineFocus to one of the above-saved event IDs.
-
-                        // TODO: the docs for `TimelineBuilder::with_focus()` claim that the timeline's focus mode
-                        //       can be changed after creation, but I do not see any methods to actually do that.
-                        //       <https://matrix-org.github.io/matrix-rust-sdk/matrix_sdk_ui/timeline/struct.TimelineBuilder.html#method.with_focus>
-                        //
-                        //       As such, we probably need to create a new async request enum variant
-                        //       that tells the background async task to build a new timeline
-                        //       (either in live mode or focused mode around one or more events)
-                        //       and then replaces the existing timeline in ALL_ROOMS_INFO with the new one.
                     }
-
-                    // Maybe todo?: we can often avoid the following loops that iterate over the `items` list
-                    //       by only doing that if `clear_cache` is true, or if `changed_indices` range includes
-                    //       any index that comes before (is less than) the above `curr_first_id`.
-
                     if new_items.len() == tl.items.len() {
                         // println!("Timeline::handle_event(): no jump necessary for updated timeline of same length: {}", items.len());
                     } else if curr_first_id > new_items.len() {
@@ -155,9 +119,6 @@ impl RoomScreen {
                             curr_first_id,
                             new_items.len()
                         );
-                        // portal_list.set_first_id_and_scroll(new_items.len().saturating_sub(1), 0.0);
-                        // portal_list.set_tail_range(true);
-                        // jump_to_bottom.update_visibility(cx, true);
                     } else if let Some((curr_item_idx, new_item_idx, new_item_scroll, _event_id)) =
                         find_new_item_matching_current_item(
                             0,
@@ -175,13 +136,6 @@ impl RoomScreen {
                             tl.prev_first_index = Some(new_item_idx);
                             // Set scrolled_past_read_marker false when we jump to a new event
                             tl.scrolled_past_read_marker = false;
-                            // When the tooltip is up, the timeline may jump. This may take away the hover out event to required to clear the tooltip
-                            // cx.widget_action(
-                            //     ui,
-                            //     &Scope::empty().path,
-                            //     RoomScreenTooltipActions::HoverOut,
-                            // );
-                            // notify frontend ?
                         }
                     }
                     //
@@ -191,46 +145,10 @@ impl RoomScreen {
                         // eprintln!("!!! Couldn't find new event with matching ID for ANY event currently visible in the portal list");
                     }
 
-                    // If new items were appended to the end of the timeline, show an unread messages badge on the jump to bottom button.
-                    // if is_append && !portal_list.is_at_end() {
-                    //     if let Some(room_id) = &self.room_id {
-                    //         // Immediately show the unread badge with no count while we fetch the actual count in the background.
-                    //         jump_to_bottom
-                    //             .show_unread_message_badge(cx, UnreadMessageCount::Unknown);
-                    //         submit_async_request(MatrixRequest::GetNumberUnreadMessages {
-                    //             room_id: room_id.clone(),
-                    //         });
-                    //     }
-                    // }
-
                     if clear_cache {
                         tl.content_drawn_since_last_update.clear();
                         tl.profile_drawn_since_last_update.clear();
                         tl.fully_paginated = false;
-
-                        // If this RoomScreen is showing the loading pane and has an ongoing backwards pagination request,
-                        // then we should update the status message in that loading pane
-                        // and then continue paginating backwards until we find the target event.
-                        // Note that we do this here because `clear_cache` will always be true if backwards pagination occurred.
-                        // let loading_pane = self.view.loading_pane(id!(loading_pane));
-                        // let mut loading_pane_state = loading_pane.take_state();
-                        // if let LoadingPaneState::BackwardsPaginateUntilEvent {
-                        //     ref mut events_paginated,
-                        //     target_event_id,
-                        //     ..
-                        // } = &mut loading_pane_state
-                        // {
-                        //     *events_paginated += new_items.len().saturating_sub(tl.items.len());
-                        //     println!("While finding target event {target_event_id}, loaded {events_paginated} messages...");
-                        //     // Here, we assume that we have not yet found the target event,
-                        //     // so we need to continue paginating backwards.
-                        //     // If the target event has already been found, it will be handled
-                        //     // in the `TargetEventFound` match arm below, which will set
-                        //     // `should_continue_backwards_pagination` to `false`.
-                        //     // So either way, it's okay to set this to `true` here.
-                        //     should_continue_backwards_pagination = true;
-                        // }
-                        // loading_pane.set_state(cx, loading_pane_state);
                     } else {
                         tl.content_drawn_since_last_update
                             .remove(changed_indices.clone());
@@ -265,22 +183,6 @@ impl RoomScreen {
 
                     // println!("TargetEventFound: is_valid? {is_valid}. room {}, event {target_event_id}, index {index} of {}\n  --> item: {item:?}", tl.room_id, tl.items.len());
                     if is_valid {
-                        // We successfully found the target event, so we can close the loading pane,
-                        // reset the loading panestate to `None`, and stop issuing backwards pagination requests.
-                        // loading_pane.set_status(cx, "Successfully found replied-to message!");
-                        // loading_pane.set_state(cx, LoadingPaneState::None);
-
-                        // NOTE: this code was copied from the `MessageAction::JumpToRelated` handler;
-                        //       we should deduplicate them at some point.
-                        // let speed = 50.0;
-                        // Scroll to the message right above the replied-to message.
-                        // FIXME: `smooth_scroll_to` should accept a scroll offset parameter too,
-                        //       so that we can scroll to the replied-to message and have it
-                        //       appear beneath the top of the viewport.
-                        // portal_list.smooth_scroll_to(cx, index.saturating_sub(1), speed, None);
-                        // // start highlight animation.
-                        // tl.message_highlight_animation_state =
-                        //     MessageHighlightAnimationState::Pending { item_id: index };
                     } else {
                         // Here, the target event was not found in the current timeline,
                         // or we found it previously but it is no longer in the timeline (or has moved),
@@ -297,9 +199,6 @@ impl RoomScreen {
                     }
 
                     should_continue_backwards_pagination = false;
-
-                    // redraw now before any other items get added to the timeline list.
-                    // self.view.redraw(cx);
                 }
                 TimelineUpdate::PaginationRunning(direction) => {
                     println!(

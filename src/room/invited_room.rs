@@ -55,13 +55,13 @@ pub enum InviteState {
     #[default]
     WaitingOnUserInput,
     /// Waiting for the server to respond to the user's "join room" action.
-    WaitingForJoinResult,
+    _WaitingForJoinResult,
     /// Waiting for the server to respond to the user's "leave room" action.
-    WaitingForLeaveResult,
+    _WaitingForLeaveResult,
     /// The invite was accepted and the room was successfully joined.
     /// We're now waiting for our client to receive the joined room from the homeserver.
-    WaitingForJoinedRoom,
+    _WaitingForJoinedRoom,
     /// The invite was declined and the room was successfully left.
     /// This should result in the InviteScreen being closed.
-    RoomLeft,
+    _RoomLeft,
 }

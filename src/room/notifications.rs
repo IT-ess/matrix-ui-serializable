@@ -56,7 +56,7 @@ pub async fn register_notifications(
 ) {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     if _mobile_push_config.is_some() {
-        register_mobile_push_notifications(&client, _mobile_push_config.unwrap()).await;
+        _register_mobile_push_notifications(&client, _mobile_push_config.unwrap()).await;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     register_os_desktop_notifications(&client).await;
@@ -76,9 +76,21 @@ impl MobilePushNotificationConfig {
             app_id,
         }
     }
+
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    pub fn sygnal_gateway_url(&self) -> &str {
+        &self.sygnal_gateway_url
+    }
+
+    pub fn app_id(&self) -> &str {
+        &self.app_id
+    }
 }
 
-pub async fn register_mobile_push_notifications(
+pub async fn _register_mobile_push_notifications(
     client: &Client,
     config: MobilePushNotificationConfig,
 ) {
