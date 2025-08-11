@@ -24,7 +24,6 @@ Thus, this lib follows more or less the MVVM architectural pattern, this lib + a
 
 
 # Usage
-<!--To use this lib you must call the `matrix_ui_serializable::init` function with a valid `LibConfig` struct. This struct contains all required mechanisms your adapter must implement to update the frontend state :-->
 
 To use this lib you must create your own "adapter" (or use an existing one). The adapter must handle the three means of communication between frontend and backend : **commands**, **events** and **state updates**.
 
@@ -48,16 +47,23 @@ Backend outgoing events work with a tokio broadcaster. The *receiver* part of th
 
 Frontend events cannot be listen directly by the lib, so the adapter must forward them to the lib through a tokio channel. The receiver part of this channel must be passed at lib initialization (see LibConfig). More details about incoming events here.
 
+## Initializing the lib
 
-<!--
-### Updaters
-
-Those are the functions that are called whenever the state of a given store changes. They have access to the Rust state and can serialize this state if needed (to pass it to a javascript frontend for instance). More details about each updater here.
-
-### Event receivers
-
-
+The lib init is handled by a single `init` function that accepts a `LibConfig` struct. This struct is constructed with the `updaters` and `event_receivers` mentionned earlier plus those objects :
 
 ### Session option
 
-To be OS agnostic, the session storage (and encryption) must be handled by the adapter. If an existing session is found, pass it, and the matrix client will be restored automatically. If not, -->
+To be OS agnostic, the session storage (and encryption) must be handled by the adapter.
+Thus if an existing session is found, pass it to the lib, and the matrix client will be restored automatically. If not, pass `None`, and handle login with the `login_and_create_new_session` command.
+
+### Mobile Push Config
+
+If your client is a mobile iOS or Android app, the lib supports registering to mobile push notifications (APNS or FCM). You only need to provide your app identifier, the [sygnal push gateway](https://github.com/matrix-org/sygnal) url and the push token. Otherwise, pass none.
+
+### Temporary directory
+
+Downloaded files are written to the temporary dir of the app. Just provide a `PathBuf` to this dir.
+
+# Credits
+
+Huge thanks to [Kevin Boos](https://github.com/kevinaboos) and the [Robius project](https://github.com/project-robius) team for their awesome work on the [Robrix](https://github.com/project-robius/robrix) client that inspired me for this different implementation.
