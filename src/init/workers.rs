@@ -887,11 +887,6 @@ pub async fn async_worker(
                     if let Some(room_or_alias_id) = room_or_alias_id {
                         match client.get_room_preview(room_or_alias_id, via).await {
                             Ok(_preview) => {},
-                            // Cx::post_action(MatrixLinkPillState::Loaded {
-                            //     matrix_id: matrix_id.clone(),
-                            //     name: preview.name.unwrap_or_else(|| room_or_alias_id.to_string()),
-                            //     avatar_url: preview.avatar_url
-                            // }),
                             Err(_e) => {
                                 println!("Failed to get room link pill info for {room_or_alias_id:?}: {_e:?}");
                             }

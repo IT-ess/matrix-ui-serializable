@@ -76,7 +76,6 @@ pub fn to_frontend_timeline_item<'a>(
                         .in_reply_to
                         .clone()
                         .map_or(msg_like.thread_root.clone(), |o| Some(o.event_id));
-                    // TODO: create a MsgLike mapper to refacto
                     match msg_like.kind.clone() {
                         MsgLikeKind::Message(message) => match message.msgtype().clone() {
                             _ => {
@@ -302,7 +301,6 @@ fn map_msg_event_content(content: MessageType) -> FrontendMsgLikeKind {
         MessageType::Text(c) => FrontendMsgLikeKind::Text(c),
         MessageType::Video(c) => FrontendMsgLikeKind::Video(c),
         MessageType::Emote(c) => FrontendMsgLikeKind::Emote(c),
-        // Not supported by frontend
         MessageType::Location(c) => FrontendMsgLikeKind::Location(c),
         MessageType::Notice(c) => FrontendMsgLikeKind::Notice(c),
         MessageType::ServerNotice(c) => FrontendMsgLikeKind::ServerNotice(c),

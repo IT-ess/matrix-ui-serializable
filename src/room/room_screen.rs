@@ -179,7 +179,6 @@ impl RoomScreen {
                         item.as_event()
                             .is_some_and(|ev| ev.event_id() == Some(&target_event_id))
                     });
-                    // let loading_pane = self.view.loading_pane(id!(loading_pane));
 
                     // println!("TargetEventFound: is_valid? {is_valid}. room {}, event {target_event_id}, index {index} of {}\n  --> item: {item:?}", tl.room_id, tl.items.len());
                     if is_valid {
@@ -264,7 +263,7 @@ impl RoomScreen {
                     });
                     println!("{:?}", self.members);
                 }
-                TimelineUpdate::MediaFetched => {
+                TimelineUpdate::_MediaFetched => {
                     println!(
                         "Timeline::handle_event(): media fetched for room {}",
                         tl.room_id
@@ -276,9 +275,7 @@ impl RoomScreen {
                     timeline_event_id: _,
                     result: _,
                 } => {
-                    // self.view
-                    //     .editing_pane(id!(editing_pane))
-                    //     .handle_edit_result(cx, timeline_event_id, result);
+                    // TODO: display popup success message
                 }
                 TimelineUpdate::TypingUsers { users } => {
                     // This update loop should be kept tight & fast, so all we do here is
@@ -294,12 +291,7 @@ impl RoomScreen {
 
                     // Update the visibility of the message input bar based on the new power levels.
                     let _can_send_message = user_power_level.can_send_message();
-                    // self.view
-                    //     .view(id!(input_bar))
-                    //     .set_visible(cx, can_send_message);
-                    // self.view
-                    //     .view(id!(can_not_send_message_notice))
-                    //     .set_visible(cx, !can_send_message);
+                    // TODO: send toast notification ?
                 }
 
                 TimelineUpdate::OwnUserReadReceipt(receipt) => {
@@ -315,42 +307,6 @@ impl RoomScreen {
                 num_events: 50,
                 direction: PaginationDirection::Backwards,
             });
-        }
-
-        if done_loading {
-            // top_space.set_visible(cx, false);
-        }
-
-        if !typing_users.is_empty() {
-            let _typing_notice_text = match typing_users.as_slice() {
-                [] => String::new(),
-                [user] => format!("{user} is typing "),
-                [user1, user2] => format!("{user1} and {user2} are typing "),
-                [user1, user2, others @ ..] => {
-                    if others.len() > 1 {
-                        format!("{user1}, {user2}, and {} are typing ", &others[0])
-                    } else {
-                        format!("{user1}, {user2}, and {} others are typing ", others.len())
-                    }
-                }
-            };
-            // Set the typing notice text and make its view visible.
-            // self.view
-            //     .label(id!(typing_label))
-            //     .set_text(cx, &typing_notice_text);
-            // self.view.view(id!(typing_notice)).set_visible(cx, true);
-            // // Animate in the typing notice view (sliding it up from the bottom).
-            // self.animator_play(cx, id!(typing_notice_animator.show));
-            // // Start the typing notice text animation of bouncing dots.
-            // self.view
-            //     .typing_animation(id!(typing_animation))
-            //     .start_animation(cx);
-        } else {
-            // Animate out the typing notice view (sliding it out towards the bottom).
-            // self.animator_play(cx, id!(typing_notice_animator.hide));
-            // self.view
-            //     .typing_animation(id!(typing_animation))
-            //     .stop_animation(cx);
         }
 
         if num_updates > 0 {
@@ -404,7 +360,6 @@ impl RoomScreen {
         };
 
         // Subscribe to typing notices, but hide the typing notice view initially.
-        // self.view(id!(typing_notice)).set_visible(cx, false);
         submit_async_request(MatrixRequest::SubscribeToTypingNotices {
             room_id: room_id.clone(),
             subscribe: true,
@@ -442,7 +397,6 @@ impl RoomScreen {
         // we can proceed to processing pending background updates, and if any were processed,
         // the timeline will also be redrawn.
         if first_time_showing_room {
-            // let portal_list = self.portal_list(id!(list));
             self.process_timeline_updates();
         }
 
@@ -500,33 +454,10 @@ impl RoomScreen {
         // }
 
         self.hide_timeline();
-        // Reset the the state of the inner loading pane.
-        // self.loading_pane(id!(loading_pane)).take_state();
         self.room_name = room_name_or_id(room_name.into(), &room_id);
         self.room_id = room_id.clone();
 
-        // Clear any mention input state
-        // let input_bar = self.view.room_input_bar(id!(input_bar));
-        // let message_input = input_bar.mentionable_text_input(id!(message_input));
-        // message_input.set_room_id(room_id);
-
         self.show_timeline();
-    }
-
-    /// Sends read receipts based on the current scroll position of the timeline.
-    fn _send_user_read_receipts_based_on_scroll_pos(
-        &mut self,
-        _scrolled: bool,
-        _first_id: usize,
-        _visible_items: usize,
-    ) {
-        // TODO: leave this to frontend
-    }
-
-    /// Sends a backwards pagination request if the user is scrolling up
-    /// and is approaching the top of the timeline.
-    fn _send_pagination_request_based_on_scroll_pos(&mut self, _scrolled: bool, _first_id: usize) {
-        // TODO: leave this to frontend
     }
 }
 

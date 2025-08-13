@@ -146,7 +146,7 @@ pub enum TimelineUpdate {
     RoomMembersListFetched { members: Vec<RoomMember> },
     /// A notice that one or more requested media items (images, videos, etc.)
     /// that should be displayed in this timeline have now been fetched and are available.
-    MediaFetched,
+    _MediaFetched,
     /// A notice that one or more members of a this room are currently typing.
     TypingUsers {
         /// The list of users (their displayable name) who are currently typing in this room.
@@ -602,10 +602,13 @@ pub async fn timeline_subscriber_handler(
                     // Update the latest event for this room.
                     // We always do this in case a redaction or other event has changed the latest event.
                     if let Some(new_latest) = new_latest_event {
-                        let _room_avatar_changed = update_latest_event(room_id.clone(), &new_latest, Some(&timeline_update_sender));
-                        // if room_avatar_changed {
-                        //     spawn_fetch_room_avatar(room.clone());
-                        // }
+                        let room_avatar_changed = update_latest_event(room_id.clone(), &new_latest, Some(&timeline_update_sender));
+                        if room_avatar_changed & room.avatar_url().is_some() {
+                            enqueue_rooms_list_update(RoomsListUpdate::UpdateRoomAvatar {
+                                room_id: room_id.clone(),
+                                avatar: room.avatar_url().unwrap(),
+                            });
+                        }
                         latest_event = Some(new_latest);
                     }
 

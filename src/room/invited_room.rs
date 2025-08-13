@@ -24,8 +24,6 @@ pub struct InvitedRoomInfo {
     /// The state of this how this invite is being handled by the client backend
     /// and what should be shown in the UI.
     pub invite_state: InviteState,
-    /// Whether this room is currently selected in the UI.
-    pub is_selected: bool, // TODO: remove if not needed
     /// Whether this is an invite to a direct room.
     pub is_direct: bool,
 }

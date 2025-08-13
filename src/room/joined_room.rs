@@ -3,7 +3,9 @@ use std::sync::Arc;
 use crate::{
     events::{
         events::get_latest_event_details,
-        timeline::{TimelineRequestSender, TimelineUpdate, timeline_subscriber_handler},
+        timeline::{
+            TimelineRequestSender, TimelineUpdate, timeline_subscriber_handler, update_latest_event,
+        },
     },
     init::singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, TOMBSTONED_ROOMS, get_client},
     room::{
@@ -48,7 +50,6 @@ pub struct JoinedRoomDetails {
     replaces_tombstoned_room: Option<OwnedRoomId>,
 }
 impl Drop for JoinedRoomDetails {
-    // TODO: implement dropping the Svelte store as well
     fn drop(&mut self) {
         println!("Dropping RoomInfo for room {}", self.room_id);
         self.timeline_subscriber_handler_task.abort();
@@ -164,7 +165,6 @@ pub async fn add_new_room(
                 alt_aliases: room.alt_aliases(),
                 latest,
                 invite_state: Default::default(),
-                is_selected: false,
                 is_direct,
             }));
             return Ok(());
@@ -277,7 +277,7 @@ pub async fn update_room(
     let new_room_id = new_room.room_id().to_owned();
     if old_room.room_id == new_room_id {
         let new_room_name = new_room.display_name().await.ok();
-        let room_avatar_changed = false;
+        let mut room_avatar_changed = false;
 
         // Handle state transitions for a room.
         let old_room_state = old_room.room_state;
@@ -326,19 +326,40 @@ pub async fn update_room(
             }
         }
 
-        // if let Some(new_latest_event) = new_room.latest_event() { TODO: check if this is still necessary
-        //     if let Some(old_latest_event) = old_room.room.latest_event() {
-        //         if new_latest_event. > old_latest_event.timestamp() {
-        //             println!("Updating latest event for room {}", new_room_id);
-        //             room_avatar_changed =
-        //                 update_latest_event(new_room_id.clone(), &new_latest_event, None);
-        //         }
-        //     }
-        // }
+        let Some(client) = get_client() else {
+            return Ok(());
+        };
+        if let (Some(new_latest_event), Some(old_latest_event)) =
+            (new_room.latest_event(), old_room.room.latest_event())
+        {
+            if let Some(new_latest_event) =
+                EventTimelineItem::from_latest_event(client.clone(), &new_room_id, new_latest_event)
+                    .await
+            {
+                if let Some(old_latest_event) = EventTimelineItem::from_latest_event(
+                    client.clone(),
+                    &new_room_id,
+                    old_latest_event,
+                )
+                .await
+                {
+                    if new_latest_event.timestamp() > old_latest_event.timestamp() {
+                        println!("Updating latest event for room {}", new_room_id);
+                        room_avatar_changed =
+                            update_latest_event(new_room_id.clone(), &new_latest_event, None);
+                    }
+                }
+            }
+        }
 
-        if room_avatar_changed || (old_room.room.avatar_url() != new_room.avatar_url()) {
+        if (room_avatar_changed || (old_room.room.avatar_url() != new_room.avatar_url()))
+            & new_room.avatar_url().is_some()
+        {
             println!("Updating avatar for room {}", new_room_id);
-            // spawn_fetch_room_avatar(new_room.inner_room().clone());
+            enqueue_rooms_list_update(RoomsListUpdate::UpdateRoomAvatar {
+                room_id: new_room_id.clone(),
+                avatar: new_room.avatar_url().unwrap(),
+            });
         }
 
         if let Some(new_room_name) = new_room_name {

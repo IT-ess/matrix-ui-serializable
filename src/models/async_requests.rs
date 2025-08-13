@@ -99,13 +99,6 @@ pub enum MatrixRequest {
     },
     /// Request to resolve a room alias into a room ID and the servers that know about that room.
     ResolveRoomAlias(OwnedRoomAliasId),
-    /// Request to fetch an Avatar image from the server.
-    /// Upon completion of the async media request, the `on_fetched` function
-    /// will be invoked with the content of an `AvatarUpdate`.
-    // FetchAvatar {
-    //     mxc_uri: OwnedMxcUri,
-    //     on_fetched: fn(AvatarUpdate),
-    // },
     /// Request to fetch media from the server.
     /// Upon completion of the async media request, the `on_fetched` function
     /// will be invoked with four arguments: the `destination`, the `media_request`,

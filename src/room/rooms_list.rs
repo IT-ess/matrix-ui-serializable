@@ -71,10 +71,10 @@ pub enum RoomsListUpdate {
         new_room_name: RoomDisplayName,
     },
     /// Update the avatar (image) for the given room.
-    // UpdateRoomAvatar {
-    //     room_id: OwnedRoomId,
-    //     avatar: RoomPreviewAvatar,
-    // },
+    UpdateRoomAvatar {
+        room_id: OwnedRoomId,
+        avatar: OwnedMxcUri,
+    },
     /// Remove the given room from the rooms list
     RemoveRoom {
         room_id: OwnedRoomId,
@@ -302,13 +302,13 @@ impl RoomsList {
                     }
                     self.update_status_rooms_count();
                 }
-                // RoomsListUpdate::UpdateRoomAvatar { room_id, avatar } => {
-                //     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
-                //         room.avatar = avatar;
-                //     } else {
-                //         eprintln!("Error: couldn't find room {room_id} to update avatar");
-                //     }
-                // }
+                RoomsListUpdate::UpdateRoomAvatar { room_id, avatar } => {
+                    if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
+                        room.avatar = Some(avatar);
+                    } else {
+                        eprintln!("Error: couldn't find room {room_id} to update avatar");
+                    }
+                }
                 RoomsListUpdate::UpdateLatestEvent {
                     room_id,
                     timestamp,
@@ -516,15 +516,12 @@ impl RoomsList {
     /// Updates the lists of displayed rooms based on the current search filter
     /// and redraws the RoomsList.
     fn _update_displayed_rooms(&mut self, keywords: &str) {
-        // let portal_list = self.view.portal_list(id!(list));
         if keywords.is_empty() {
             // Reset the displayed rooms list to show all rooms.
             self.display_filter = RoomDisplayFilter::default();
             self.displayed_joined_rooms = self.all_joined_rooms.keys().cloned().collect();
             self.displayed_invited_rooms = self.invited_rooms.borrow().keys().cloned().collect();
             self.update_status_rooms_count();
-            // portal_list.set_first_id_and_scroll(0, 0.0);
-            // self.redraw(cx);
             return;
         }
 

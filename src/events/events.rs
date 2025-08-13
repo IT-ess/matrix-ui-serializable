@@ -1,6 +1,5 @@
 use matrix_sdk::{
     Client,
-    encryption::VerificationState,
     ruma::{
         MilliSecondsSinceUnixEpoch, OwnedRoomId,
         events::{
@@ -18,21 +17,6 @@ use super::{
 
 // These event handlers handle only the verification events. Other events are managed by the matrix_sdk_ui sync service.
 pub fn add_event_handlers(client: Client) -> anyhow::Result<Client> {
-    let mut verification_state_subscriber = client.encryption().verification_state();
-    println!(
-        "Initial verification state is {:?}",
-        verification_state_subscriber.get()
-    );
-    Handle::current().spawn(async move {
-        while let Some(state) = verification_state_subscriber.next().await {
-            println!("Received a verification state update: {state:?}");
-            // Cx::post_action(VerificationStateAction::Update(state));
-            // TODO: display verification state
-            if let VerificationState::Verified = state {
-                break;
-            }
-        }
-    });
     client.add_event_handler(
         |ev: ToDeviceKeyVerificationRequestEvent, client: Client| async move {
             if let Some(request) = client
