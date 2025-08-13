@@ -1,8 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
-use rangemap::RangeSet;
 use serde::Serialize;
 
 use crate::{
@@ -12,8 +14,10 @@ use crate::{
     },
     models::{
         async_requests::{MatrixRequest, submit_async_request},
+        events::{ToastNotificationRequest, ToastNotificationVariant},
         state_updater::StateUpdater,
     },
+    room::notifications::enqueue_toast_notification,
     user::user_power_level::UserPowerLevels,
     utils::room_name_or_id,
 };
@@ -30,6 +34,10 @@ pub struct RoomScreen {
     tl_state: Option<TimelineUiState>,
     /// Known members of this room
     members: BTreeMap<OwnedUserId, FrontendRoomMember>,
+    /// The users of this room that are currently typing a message
+    typing_users: HashSet<String>,
+    /// Wether this room is still loading or not
+    done_loading: bool,
     /// The state updater passed by the adapter
     #[serde(skip)]
     state_updaters: Arc<Box<dyn StateUpdater>>,
@@ -56,6 +64,8 @@ impl RoomScreen {
             room_name,
             tl_state: None,
             members: BTreeMap::new(),
+            typing_users: HashSet::new(),
+            done_loading: false,
             state_updaters: updaters,
         }
     }
@@ -77,24 +87,19 @@ impl RoomScreen {
             return;
         };
 
-        let mut done_loading = false;
         let mut should_continue_backwards_pagination = false;
         let mut num_updates = 0;
-        let mut typing_users = Vec::new();
         while let Ok(update) = tl.update_receiver.try_recv() {
             num_updates += 1;
             match update {
                 TimelineUpdate::FirstUpdate { initial_items } => {
-                    tl.content_drawn_since_last_update.clear();
-                    tl.profile_drawn_since_last_update.clear();
                     tl.fully_paginated = false;
 
                     tl.items = initial_items;
-                    done_loading = true;
+                    self.done_loading = true;
                 }
                 TimelineUpdate::NewItems {
                     new_items,
-                    changed_indices,
                     clear_cache,
                 } => {
                     if new_items.is_empty() {
@@ -132,8 +137,6 @@ impl RoomScreen {
                             println!(
                                 "Timeline::handle_event(): jumping view from event index {curr_item_idx} to new index {new_item_idx}, scroll {new_item_scroll}, event ID {_event_id}"
                             );
-                            // portal_list.set_first_id_and_scroll(new_item_idx, new_item_scroll);
-                            tl.prev_first_index = Some(new_item_idx);
                             // Set scrolled_past_read_marker false when we jump to a new event
                             tl.scrolled_past_read_marker = false;
                         }
@@ -146,18 +149,10 @@ impl RoomScreen {
                     }
 
                     if clear_cache {
-                        tl.content_drawn_since_last_update.clear();
-                        tl.profile_drawn_since_last_update.clear();
                         tl.fully_paginated = false;
-                    } else {
-                        tl.content_drawn_since_last_update
-                            .remove(changed_indices.clone());
-                        tl.profile_drawn_since_last_update
-                            .remove(changed_indices.clone());
-                        // println!("Timeline::handle_event(): changed_indices: {changed_indices:?}, items len: {}\ncontent drawn: {:#?}\nprofile drawn: {:#?}", items.len(), tl.content_drawn_since_last_update, tl.profile_drawn_since_last_update);
                     }
                     tl.items = new_items;
-                    done_loading = true;
+                    self.done_loading = true;
                 }
                 TimelineUpdate::NewUnreadMessagesCount(_unread_messages_count) => {
                     // jump_to_bottom.show_unread_message_badge(unread_messages_count);
@@ -191,10 +186,6 @@ impl RoomScreen {
                             tl.items.len(),
                             tl.room_id
                         );
-                        // Show this error in the loading pane, which should already be open.
-                        // loading_pane.set_state(LoadingPaneState::Error(String::from(
-                        //     "Unable to find related message; it may have been deleted.",
-                        // )));
                     }
 
                     should_continue_backwards_pagination = false;
@@ -205,8 +196,7 @@ impl RoomScreen {
                         tl.room_id
                     );
                     if direction == PaginationDirection::Backwards {
-                        // top_space.set_visible(cx, true);
-                        done_loading = false;
+                        self.done_loading = false;
                     } else {
                         eprintln!("Unexpected PaginationRunning update in the Forwards direction");
                     }
@@ -216,7 +206,7 @@ impl RoomScreen {
                         "Pagination error ({direction}) in room {}: {error:?}",
                         tl.room_id
                     );
-                    done_loading = true;
+                    self.done_loading = true;
                 }
                 TimelineUpdate::PaginationIdle {
                     fully_paginated,
@@ -227,7 +217,7 @@ impl RoomScreen {
                         // (with the "loading" message) until the corresponding `NewItems` update is received.
                         tl.fully_paginated = fully_paginated;
                         if fully_paginated {
-                            done_loading = true;
+                            self.done_loading = true;
                         }
                     } else {
                         eprintln!("Unexpected PaginationIdle update in the Forwards direction");
@@ -272,26 +262,30 @@ impl RoomScreen {
                     // but for now we just fall through and let the final `redraw()` call re-draw the whole timeline view.
                 }
                 TimelineUpdate::MessageEdited {
-                    timeline_event_id: _,
-                    result: _,
+                    timeline_event_id,
+                    result,
                 } => {
-                    // TODO: display popup success message
+                    if result.is_ok() {
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Successfully edited message."),
+                            None,
+                            ToastNotificationVariant::Success,
+                        ));
+                    } else {
+                        eprintln!("Error editing event with id {timeline_event_id:?}");
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Error while editing event."),
+                            None,
+                            ToastNotificationVariant::Error,
+                        ));
+                    }
                 }
                 TimelineUpdate::TypingUsers { users } => {
-                    // This update loop should be kept tight & fast, so all we do here is
-                    // save the list of typing users for future use after the loop exits.
-                    // Then, we "process" it later (by turning it into a string) after the
-                    // update loop has completed, which avoids unnecessary expensive work
-                    // if the list of typing users gets updated many times in a row.
-                    typing_users = users;
+                    self.typing_users.extend(users);
                 }
 
                 TimelineUpdate::UserPowerLevels(user_power_level) => {
                     tl.user_power = user_power_level;
-
-                    // Update the visibility of the message input bar based on the new power levels.
-                    let _can_send_message = user_power_level.can_send_message();
-                    // TODO: send toast notification ?
                 }
 
                 TimelineUpdate::OwnUserReadReceipt(receipt) => {
@@ -347,12 +341,8 @@ impl RoomScreen {
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
                 items: Vector::new(),
-                content_drawn_since_last_update: RangeSet::new(),
-                profile_drawn_since_last_update: RangeSet::new(),
                 update_receiver,
                 request_sender,
-                last_scrolled_index: usize::MAX,
-                prev_first_index: None,
                 scrolled_past_read_marker: false,
                 latest_own_user_receipt: None,
             };

@@ -11,6 +11,7 @@ use crate::{
     room::{
         invited_room::{InvitedRoomInfo, InviterInfo},
         rooms_list::{JoinedRoomInfo, RoomsListUpdate, enqueue_rooms_list_update},
+        tags::FrontendRoomTags,
     },
 };
 use matrix_sdk::{RoomState, event_handler::EventHandlerDropGuard, ruma::OwnedRoomId};
@@ -252,7 +253,7 @@ pub async fn add_new_room(
     enqueue_rooms_list_update(RoomsListUpdate::AddJoinedRoom(JoinedRoomInfo {
         room_id,
         latest,
-        tags: room.tags().await.ok().flatten().unwrap_or_default(),
+        tags: FrontendRoomTags::from(room.tags().await.ok().flatten().unwrap_or_default()),
         num_unread_messages: room.num_unread_messages(),
         num_unread_mentions: room.num_unread_mentions(),
         // start with a basic text avatar; the avatar image will be fetched asynchronously below.

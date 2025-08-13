@@ -57,7 +57,7 @@ impl FilterableRoom for JoinedRoomInfo {
     }
 
     fn _tags(&self) -> &Tags {
-        &self.tags
+        self.tags.inner()
     }
 }
 
