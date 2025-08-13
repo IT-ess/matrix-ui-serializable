@@ -14,7 +14,7 @@ use matrix_sdk::{
     },
 };
 use matrix_sdk_ui::room_list_service::RoomListLoadingState;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::{
     runtime::Handle,
     sync::oneshot::{self, Sender},
@@ -27,6 +27,7 @@ use crate::{
         invited_room::InvitedRoomInfo,
         joined_room::UnreadMessageCount,
         room_filter::{FilterableRoom, RoomDisplayFilterBuilder, RoomFilterCriteria, SortFn},
+        tags::FrontendRoomTags,
     },
     stores::room_store::send_room_creation_request_and_await_response,
 };
@@ -103,7 +104,7 @@ pub fn enqueue_rooms_list_update(update: RoomsListUpdate) {
 ///
 /// This includes info needed display a preview of that room in the RoomsList
 /// and to filter the list of rooms based on the current search filter.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JoinedRoomInfo {
     /// The matrix ID of this room.
@@ -121,8 +122,7 @@ pub struct JoinedRoomInfo {
     /// The tags associated with this room, if any.
     /// This includes things like is_favourite, is_low_priority,
     /// whether the room is a server notice room, etc.
-    #[serde(skip)]
-    pub(crate) tags: Tags,
+    pub(crate) tags: FrontendRoomTags,
     /// The timestamp and Html text content of the latest message in this room.
     pub(crate) latest: Option<(MilliSecondsSinceUnixEpoch, String)>,
     /// The avatar for this room
@@ -404,7 +404,7 @@ impl RoomsList {
                 }
                 RoomsListUpdate::Tags { room_id, new_tags } => {
                     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
-                        room.tags = new_tags;
+                        room.tags = FrontendRoomTags::from(new_tags);
                     } else if let Some(_room) = self.invited_rooms.borrow().get(&room_id) {
                         println!("Ignoring updated tags update for invited room {room_id}");
                     } else {

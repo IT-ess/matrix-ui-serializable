@@ -150,8 +150,6 @@ impl RoomScreen {
 
                     if clear_cache {
                         tl.fully_paginated = false;
-                    } else {
-                        // println!("Timeline::handle_event(): changed_indices: {changed_indices:?}, items len: {}\ncontent drawn: {:#?}\nprofile drawn: {:#?}", items.len(), tl.content_drawn_since_last_update, tl.profile_drawn_since_last_update);
                     }
                     tl.items = new_items;
                     self.done_loading = true;
@@ -188,10 +186,6 @@ impl RoomScreen {
                             tl.items.len(),
                             tl.room_id
                         );
-                        // Show this error in the loading pane, which should already be open.
-                        // loading_pane.set_state(LoadingPaneState::Error(String::from(
-                        //     "Unable to find related message; it may have been deleted.",
-                        // )));
                     }
 
                     should_continue_backwards_pagination = false;
@@ -292,14 +286,6 @@ impl RoomScreen {
 
                 TimelineUpdate::UserPowerLevels(user_power_level) => {
                     tl.user_power = user_power_level;
-
-                    // Update the visibility of the message input bar based on the new power levels.
-                    let _can_send_message = user_power_level.can_send_message();
-                    enqueue_toast_notification(ToastNotificationRequest::new(
-                        format!("Your permissions for this room have changed."),
-                        None,
-                        ToastNotificationVariant::Info,
-                    ));
                 }
 
                 TimelineUpdate::OwnUserReadReceipt(receipt) => {

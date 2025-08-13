@@ -153,7 +153,7 @@ impl UserPowerLevels {
         self.contains(UserPowerLevels::Location)
     }
 
-    pub fn can_send_message(self) -> bool {
+    pub fn _can_send_message(self) -> bool {
         self.contains(UserPowerLevels::RoomMessage) || self.contains(UserPowerLevels::Message)
     }
 
