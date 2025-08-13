@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
-use rangemap::RangeSet;
 use serde::Serialize;
 
 use crate::{
@@ -85,8 +84,6 @@ impl RoomScreen {
             num_updates += 1;
             match update {
                 TimelineUpdate::FirstUpdate { initial_items } => {
-                    tl.content_drawn_since_last_update.clear();
-                    tl.profile_drawn_since_last_update.clear();
                     tl.fully_paginated = false;
 
                     tl.items = initial_items;
@@ -132,8 +129,6 @@ impl RoomScreen {
                             println!(
                                 "Timeline::handle_event(): jumping view from event index {curr_item_idx} to new index {new_item_idx}, scroll {new_item_scroll}, event ID {_event_id}"
                             );
-                            // portal_list.set_first_id_and_scroll(new_item_idx, new_item_scroll);
-                            tl.prev_first_index = Some(new_item_idx);
                             // Set scrolled_past_read_marker false when we jump to a new event
                             tl.scrolled_past_read_marker = false;
                         }
@@ -146,14 +141,8 @@ impl RoomScreen {
                     }
 
                     if clear_cache {
-                        tl.content_drawn_since_last_update.clear();
-                        tl.profile_drawn_since_last_update.clear();
                         tl.fully_paginated = false;
                     } else {
-                        tl.content_drawn_since_last_update
-                            .remove(changed_indices.clone());
-                        tl.profile_drawn_since_last_update
-                            .remove(changed_indices.clone());
                         // println!("Timeline::handle_event(): changed_indices: {changed_indices:?}, items len: {}\ncontent drawn: {:#?}\nprofile drawn: {:#?}", items.len(), tl.content_drawn_since_last_update, tl.profile_drawn_since_last_update);
                     }
                     tl.items = new_items;
@@ -347,12 +336,8 @@ impl RoomScreen {
                 // We assume timelines being viewed for the first time haven't been fully paginated.
                 fully_paginated: false,
                 items: Vector::new(),
-                content_drawn_since_last_update: RangeSet::new(),
-                profile_drawn_since_last_update: RangeSet::new(),
                 update_receiver,
                 request_sender,
-                last_scrolled_index: usize::MAX,
-                prev_first_index: None,
                 scrolled_past_read_marker: false,
                 latest_own_user_receipt: None,
             };

@@ -1,14 +1,13 @@
 use bitflags::bitflags;
 use matrix_sdk::ruma::{
-    events::{room::power_levels::RoomPowerLevels, MessageLikeEventType, StateEventType},
     UserId,
+    events::{MessageLikeEventType, StateEventType, room::power_levels::RoomPowerLevels},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Serializer};
 
 bitflags! {
     /// The powers that a user has in a given room.
-    #[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
-    #[serde(rename_all = "camelCase")]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct UserPowerLevels: u64 {
         const Ban = 1 << 0;
         const Invite = 1 << 1;
@@ -118,39 +117,39 @@ impl UserPowerLevels {
         retval
     }
 
-    pub fn can_ban(self) -> bool {
+    pub fn _can_ban(self) -> bool {
         self.contains(UserPowerLevels::Ban)
     }
 
-    pub fn can_unban(self) -> bool {
-        self.can_ban() && self.can_kick()
+    pub fn _can_unban(self) -> bool {
+        self._can_ban() && self._can_kick()
     }
 
-    pub fn can_invite(self) -> bool {
+    pub fn _can_invite(self) -> bool {
         self.contains(UserPowerLevels::Invite)
     }
 
-    pub fn can_kick(self) -> bool {
+    pub fn _can_kick(self) -> bool {
         self.contains(UserPowerLevels::Kick)
     }
 
-    pub fn can_redact(self) -> bool {
+    pub fn _can_redact(self) -> bool {
         self.contains(UserPowerLevels::Redact)
     }
 
-    pub fn can_notify_room(self) -> bool {
+    pub fn _can_notify_room(self) -> bool {
         self.contains(UserPowerLevels::NotifyRoom)
     }
 
-    pub fn can_redact_own(self) -> bool {
+    pub fn _can_redact_own(self) -> bool {
         self.contains(UserPowerLevels::RoomRedaction)
     }
 
-    pub fn can_redact_others(self) -> bool {
-        self.can_redact_own() && self.contains(UserPowerLevels::Redact)
+    pub fn _can_redact_others(self) -> bool {
+        self._can_redact_own() && self.contains(UserPowerLevels::Redact)
     }
 
-    pub fn can_send_location(self) -> bool {
+    pub fn _can_send_location(self) -> bool {
         self.contains(UserPowerLevels::Location)
     }
 
@@ -158,16 +157,66 @@ impl UserPowerLevels {
         self.contains(UserPowerLevels::RoomMessage) || self.contains(UserPowerLevels::Message)
     }
 
-    pub fn can_send_reaction(self) -> bool {
+    pub fn _can_send_reaction(self) -> bool {
         self.contains(UserPowerLevels::Reaction)
     }
 
-    pub fn can_send_sticker(self) -> bool {
+    pub fn _can_send_sticker(self) -> bool {
         self.contains(UserPowerLevels::Sticker)
     }
 
     #[doc(alias("unpin"))]
-    pub fn can_pin(self) -> bool {
+    pub fn _can_pin(self) -> bool {
         self.contains(UserPowerLevels::RoomPinnedEvents)
+    }
+}
+
+impl Serialize for UserPowerLevels {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeSeq;
+
+        let mut seq = serializer.serialize_seq(None)?;
+        if self.contains(UserPowerLevels::Ban) {
+            seq.serialize_element("ban")?;
+        }
+        if self.contains(UserPowerLevels::Invite) {
+            seq.serialize_element("invite")?;
+        }
+        if self.contains(UserPowerLevels::Kick) {
+            seq.serialize_element("kick")?;
+        }
+        if self.contains(UserPowerLevels::Redact) {
+            seq.serialize_element("redact")?;
+        }
+        if self.contains(UserPowerLevels::NotifyRoom) {
+            seq.serialize_element("notifyRoom")?;
+        }
+
+        if self.contains(UserPowerLevels::Location) {
+            seq.serialize_element("location")?;
+        }
+        if self.contains(UserPowerLevels::Message) {
+            seq.serialize_element("message")?;
+        }
+        if self.contains(UserPowerLevels::Reaction) {
+            seq.serialize_element("reaction")?;
+        }
+        if self.contains(UserPowerLevels::RoomMessage) {
+            seq.serialize_element("roomMessage")?;
+        }
+        if self.contains(UserPowerLevels::RoomRedaction) {
+            seq.serialize_element("roomRedaction")?;
+        }
+        if self.contains(UserPowerLevels::Sticker) {
+            seq.serialize_element("sticker")?;
+        }
+        if self.contains(UserPowerLevels::RoomPinnedEvents) {
+            seq.serialize_element("roomPinnedEvents")?;
+        }
+
+        seq.end()
     }
 }

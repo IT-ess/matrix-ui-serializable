@@ -22,7 +22,6 @@ use matrix_sdk_ui::{
         TimelineEventItemId, TimelineItem, TimelineItemContent,
     },
 };
-use rangemap::RangeSet;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use tokio::sync::watch;
 
@@ -186,26 +185,6 @@ pub struct TimelineUiState {
     /// The list of items (events) in this room's timeline that our client currently knows about.
     pub(crate) items: Vector<Arc<TimelineItem>>,
 
-    /// The range of items (indices in the above `items` list) whose event **contents** have been drawn
-    /// since the last update and thus do not need to be re-populated on future draw events.
-    ///
-    /// This range is partially cleared on each background update (see below) to ensure that
-    /// items modified during the update are properly redrawn. Thus, it is a conservative
-    /// "cache tracker" that may not include all items that have already been drawn,
-    /// but that's okay because big updates that clear out large parts of the rangeset
-    /// only occur during back pagination, which is both rare and slow in and of itself.
-    /// During typical usage, new events are appended to the end of the timeline,
-    /// meaning that the range of already-drawn items doesn't need to be cleared.
-    ///
-    /// Upon a background update, only item indices greater than or equal to the
-    /// `index_of_first_change` are removed from this set.
-    /// Not included in frontend serialization
-    pub(crate) content_drawn_since_last_update: RangeSet<usize>,
-
-    /// Same as `content_drawn_since_last_update`, but for the event **profiles** (avatar, username).
-    /// Not included in frontend serialization
-    pub(crate) profile_drawn_since_last_update: RangeSet<usize>,
-
     /// The channel receiver for timeline updates for this room.
     ///
     /// Here we use a synchronous (non-async) channel because the receiver runs
@@ -218,18 +197,6 @@ pub struct TimelineUiState {
     /// to the background async task that handles this room's timeline updates.
     /// Not included in frontend serialization
     pub(crate) request_sender: TimelineRequestSender,
-
-    /// The index of the timeline item that was most recently scrolled up past it.
-    /// This is used to detect when the user has scrolled up past the second visible item (index 1)
-    /// upwards to the first visible item (index 0), which is the top of the timeline,
-    /// at which point we submit a backwards pagination request to fetch more events.
-    pub(crate) last_scrolled_index: usize,
-
-    /// The index of the first item shown in the timeline's PortalList from *before* the last "jump".
-    ///
-    /// This index is saved before the timeline undergoes any jumps, e.g.,
-    /// receiving new items, major scroll changes, or other timeline view jumps.
-    pub(crate) prev_first_index: Option<usize>,
 
     /// Whether the user has scrolled past their latest read marker.
     ///
@@ -250,17 +217,15 @@ impl Serialize for TimelineUiState {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("TimelineUiState", 8)?;
+        let mut state = serializer.serialize_struct("TimelineUiState", 6)?;
 
         state.serialize_field("roomId", &self.room_id)?;
         state.serialize_field("userPower", &self.user_power)?;
         state.serialize_field("fullyPaginated", &self.fully_paginated)?;
         state.serialize_field(
             "items",
-            &serialize_timeline_items(&self.items, &self.room_id),
+            &serialize_timeline_items(&self.items, &self.room_id, &self.user_power),
         )?;
-        state.serialize_field("lastScrolledIndex", &self.last_scrolled_index)?;
-        state.serialize_field("prevFirstIndex", &self.prev_first_index)?;
         state.serialize_field("scrolledPastReadMarker", &self.scrolled_past_read_marker)?;
         state.serialize_field("latestOwnUserReceipt", &self.latest_own_user_receipt)?;
 
@@ -270,10 +235,11 @@ impl Serialize for TimelineUiState {
 fn serialize_timeline_items<'a>(
     items: &'a Vector<Arc<TimelineItem>>,
     room_id: &OwnedRoomId,
+    user_power_levels: &UserPowerLevels,
 ) -> Vec<FrontendTimelineItem<'a>> {
     items
         .iter()
-        .map(|item| to_frontend_timeline_item(item, Some(room_id)))
+        .map(|item| to_frontend_timeline_item(item, Some(room_id), user_power_levels))
         .collect()
 }
 
