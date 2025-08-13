@@ -1,7 +1,6 @@
 use std::{
     cmp::{max, min},
     collections::BTreeMap,
-    ops::Range,
     sync::{Arc, Mutex},
 };
 
@@ -89,10 +88,6 @@ pub enum TimelineUpdate {
     NewItems {
         /// The entire list of timeline items (events) for a room.
         new_items: Vector<Arc<TimelineItem>>,
-        /// The range of indices in the `items` list that have been changed in this update
-        /// and thus must be removed from any caches of drawn items in the timeline.
-        /// Any items outside of this range are assumed to be unchanged and need not be redrawn.
-        changed_indices: Range<usize>,
         /// Whether to clear the entire cache of drawn items in the timeline.
         /// This supersedes `index_of_first_change` and is used when the entire timeline is being redrawn.
         clear_cache: bool,
@@ -547,7 +542,6 @@ pub async fn timeline_subscriber_handler(
                     }
                     timeline_update_sender.send(TimelineUpdate::NewItems {
                         new_items: timeline_items.clone(),
-                        changed_indices,
                         clear_cache,
                     }).expect("Error: timeline update sender couldn't send update with new items!");
 
