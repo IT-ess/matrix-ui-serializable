@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use crate::{
-    init::login::{LoginRequest, MatrixClientConfig},
-    init::singletons::get_client,
-    models::{async_requests::MatrixRequest, device::FrontendDevice},
+    init::{
+        login::{LoginRequest, MatrixClientConfig},
+        singletons::get_client,
+    },
+    models::{async_requests::MatrixRequest, events::FrontendDevice},
     room::notifications::MobilePushNotificationConfig,
     utils::guess_device_type,
 };
