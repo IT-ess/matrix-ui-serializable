@@ -13,7 +13,6 @@ use crate::{
         workers::{async_main_loop, async_worker},
     },
     models::{
-        async_requests::MatrixRequest,
         event_bridge::EventBridge,
         events::{
             EmitEvent, MatrixRoomStoreCreatedRequest, MatrixUpdateCurrentActiveRoom,
@@ -22,7 +21,7 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::{
-        notifications::{MobilePushNotificationConfig, enqueue_toast_notification},
+        notifications::enqueue_toast_notification,
         rooms_list::{RoomsCollectionStatus, RoomsListUpdate, enqueue_rooms_list_update},
     },
 };
@@ -280,7 +279,9 @@ pub use init::login::MatrixClientConfig;
 pub use init::singletons::LOGIN_STORE_READY;
 pub use matrix_sdk::media::MediaRequestParameters;
 pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
+pub use models::async_requests::*;
 pub use models::{event_bridge, state_updater};
+pub use room::notifications::MobilePushNotificationConfig;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};

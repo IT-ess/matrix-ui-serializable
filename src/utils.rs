@@ -1,4 +1,3 @@
-use serde::Serialize;
 use std::borrow::Cow;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, sleep};
@@ -7,6 +6,7 @@ use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
 use crate::models::async_requests::{MatrixRequest, submit_async_request};
+use crate::models::events::DeviceGuessedType;
 
 use super::init::singletons::CLIENT;
 
@@ -207,16 +207,6 @@ pub fn debounce_broadcast<T: Clone + Send + 'static>(
     });
 
     rx
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum DeviceGuessedType {
-    Android,
-    Ios,
-    Web,
-    Desktop,
-    Unknown,
 }
 
 pub(crate) fn guess_device_type(display_name: Option<&str>) -> DeviceGuessedType {
