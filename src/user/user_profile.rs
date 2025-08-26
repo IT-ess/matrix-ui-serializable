@@ -181,6 +181,8 @@ impl UserProfileUpdate {
         }
     }
 }
+
+/// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
 #[derive(Debug, Clone, Serialize)]
 pub struct UserProfileMap(BTreeMap<OwnedUserId, UserProfileCacheEntry>);
 

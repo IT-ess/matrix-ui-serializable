@@ -20,7 +20,7 @@ use tokio::sync::oneshot;
 use crate::{events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER};
 
 /// Submits a request to the worker thread to be executed asynchronously.
-pub fn submit_async_request(req: MatrixRequest) {
+pub(crate) fn submit_async_request(req: MatrixRequest) {
     REQUEST_SENDER
         .get()
         .unwrap() // this is initialized

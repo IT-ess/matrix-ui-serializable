@@ -31,12 +31,13 @@ pub(crate) mod events;
 pub(crate) mod init;
 pub mod models;
 pub(crate) mod room;
-pub mod stores;
+pub(crate) mod stores;
 pub(crate) mod user;
 pub(crate) mod utils;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// matrix-ui-serializable Error enum
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -56,6 +57,7 @@ impl Serialize for Error {
     }
 }
 
+/// Required `mpsc:Receiver`s to listen to incoming events
 pub struct EventReceivers {
     room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
     verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
@@ -109,6 +111,8 @@ impl LibConfig {
     }
 }
 
+/// Function to be called once your app is starting to init this lib.
+/// This will start the workers and return a `Receiver` to forward outgoing events.
 pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     // Lib -> adapter events
     let (event_bridge, broadcast_receiver) = EventBridge::new();
@@ -277,14 +281,15 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
 pub use init::login::MatrixClientConfig;
 pub use init::singletons::LOGIN_STORE_READY;
-pub use matrix_sdk::media::MediaRequestParameters;
-pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
 pub use models::async_requests::*;
-pub use models::{event_bridge, state_updater};
 pub use room::notifications::MobilePushNotificationConfig;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};
+pub use user::user_profile::UserProfileMap;
+
+// The adapter needs some types in those modules
+pub use matrix_sdk::media::MediaRequestParameters;
+pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
 pub use tokio::sync::mpsc;
 pub use tokio::sync::oneshot;
-pub use user::user_profile::UserProfileMap;

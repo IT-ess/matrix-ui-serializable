@@ -126,7 +126,7 @@ pub struct JoinedRoomInfo {
     /// The timestamp and Html text content of the latest message in this room.
     pub(crate) latest: Option<(MilliSecondsSinceUnixEpoch, String)>,
     /// The avatar for this room
-    pub avatar: Option<OwnedMxcUri>,
+    pub(crate) avatar: Option<OwnedMxcUri>,
     /// Whether this room has been paginated at least once.
     /// We pre-paginate visible rooms at least once in order to
     /// be able to display the latest message in the room preview,
@@ -162,7 +162,8 @@ pub fn handle_rooms_loading_state(mut loading_state: Subscriber<RoomListLoadingS
     });
 }
 
-// Frontend
+/// The struct containing all the data related to the homepage rooms list.
+/// Fields are not exposed to the adapter directly, the adapter can only serialize this struct.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomsList {
@@ -226,7 +227,7 @@ pub enum RoomsCollectionStatus {
 }
 
 impl RoomsList {
-    pub fn new(updaters: Arc<Box<dyn StateUpdater>>) -> Self {
+    pub(crate) fn new(updaters: Arc<Box<dyn StateUpdater>>) -> Self {
         Self {
             invited_rooms: HashMap::default(),
             all_joined_rooms: HashMap::default(),
@@ -248,7 +249,7 @@ impl RoomsList {
     }
 
     /// Handle all pending updates to the list of all rooms.
-    pub async fn handle_rooms_list_updates(&mut self) {
+    pub(crate) async fn handle_rooms_list_updates(&mut self) {
         let mut num_updates: usize = 0;
         while let Some(update) = PENDING_ROOM_UPDATES.pop() {
             num_updates += 1;
@@ -425,7 +426,7 @@ impl RoomsList {
         }
     }
 
-    pub fn handle_current_active_room(
+    pub(crate) fn handle_current_active_room(
         &mut self,
         updated_current_active_room: Option<OwnedRoomId>,
         mut room_name: Option<String>,
