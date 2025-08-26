@@ -62,6 +62,7 @@ pub async fn register_notifications(
     register_os_desktop_notifications(&client).await;
 }
 
+/// The required parameters to register Push Notifications for a mobile app.
 pub struct MobilePushNotificationConfig {
     token: String,
     sygnal_gateway_url: String,
@@ -107,7 +108,7 @@ pub async fn _register_mobile_push_notifications(
     let pusher = PusherInit {
         ids: pusher_ids,
         app_display_name: "Matrix Svelte Client".to_string(),
-        device_display_name: "Tauri app".to_string(),
+        device_display_name: "My device".to_string(),
         profile_tag: None,
         kind: PusherKind::Http(http_pusher),
         lang: "en".to_string(),

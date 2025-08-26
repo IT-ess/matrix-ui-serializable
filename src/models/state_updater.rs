@@ -4,6 +4,8 @@ use crate::{
     user::user_profile::UserProfileMap,
 };
 
+/// Super trait that defines the required "updaters" functions that will translate a library
+/// state change into a frontend one.
 pub trait StateUpdater: StateUpdaterFunctions + std::fmt::Debug + Send + Sync {}
 
 pub trait StateUpdaterFunctions {

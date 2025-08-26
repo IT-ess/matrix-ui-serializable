@@ -50,6 +50,7 @@ pub fn get_client() -> Option<Client> {
     CLIENT.get().cloned()
 }
 
+/// Flag to be set once the frontend Login Store is up and ready
 pub static LOGIN_STORE_READY: OnceLock<bool> = OnceLock::new();
 
 #[derive(Debug, Clone)]

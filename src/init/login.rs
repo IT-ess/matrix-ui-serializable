@@ -9,6 +9,7 @@ use crate::init::singletons::CLIENT;
 
 use super::session::ClientSession;
 
+/// The user's account credentials to create a new Matrix session
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MatrixClientConfig {
     username: String,

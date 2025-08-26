@@ -4,6 +4,7 @@ use matrix_sdk::encryption::VerificationState;
 use matrix_sdk_ui::sync_service;
 use serde::{Serialize, Serializer, ser::SerializeStruct};
 
+/// Wether the user has logged in, or is in another state.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LoginState {
@@ -24,6 +25,7 @@ impl LoginState {
     }
 }
 
+/// Wether this Matrix client session has been verified or not
 #[derive(Debug, Clone)]
 pub struct FrontendVerificationState(VerificationState);
 
@@ -68,6 +70,7 @@ impl Serialize for FrontendVerificationState {
     }
 }
 
+/// Wether the matrix-sdk-ui Sync Service is running or not.
 pub struct FrontendSyncServiceState(sync_service::State);
 
 impl Deref for FrontendSyncServiceState {

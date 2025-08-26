@@ -22,7 +22,8 @@ use crate::{
     utils::room_name_or_id,
 };
 
-/// The main widget that displays a single Matrix room.
+/// A serializable struct representing the state of a given Matrix Room.
+/// Fields are not exposed to the adapter directly, the adapter can only serialize this struct.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomScreen {
