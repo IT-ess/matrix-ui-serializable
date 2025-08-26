@@ -33,7 +33,7 @@ Whenever the state of an abstracted object (a Matrix room for instance), the bac
 
 ## Commands
 
-Actions that return a response when invoked. These commands must be imported from the `commands` module and exposed to your frontend. At least the `login_and_create_new_session` must be exposed to log in. More details about commands here.
+Actions that return a response when invoked. These commands must be imported from the `commands` module and exposed to your frontend. At least the `login_and_create_new_session` must be exposed to log in. More details about commands [here](https://docs.rs/matrix-ui-serializable/latest/matrix_ui_serializable/commands/index.html).
 
 ## Events
 
@@ -41,11 +41,11 @@ Backend and frontend also communicate through events, going from the backend to 
 
 ### Outgoing events (lib -> adapter -> frontend)
 
-Backend outgoing events work with a tokio broadcaster. The *receiver* part of the broadcaster channel is returned by the `init` function of this lib to the adapter which can then listen and forward events to the frontend. Event payloads are also serializable. More details about outgoing events here.
+Backend outgoing events work with a tokio broadcaster. The *receiver* part of the broadcaster channel is returned by the `init` function of this lib to the adapter which can then listen and forward events to the frontend. Event payloads are also serializable. More details about outgoing events [here](https://docs.rs/matrix-ui-serializable/latest/matrix_ui_serializable/models/events/enum.EmitEvent.html).
 
 ### Incoming events (lib <- adapter <- frontend)
 
-Frontend events cannot be listen directly by the lib, so the adapter must forward them to the lib through a tokio channel. The receiver part of this channel must be passed at lib initialization (see LibConfig). More details about incoming events here.
+Frontend events cannot be listen directly by the lib, so the adapter must forward them to the lib through a tokio channel. The receiver part of this channel must be passed at lib initialization (see LibConfig). More details about incoming events [here](https://docs.rs/matrix-ui-serializable/latest/matrix_ui_serializable/struct.EventReceivers.html).
 
 ## Initializing the lib
 
