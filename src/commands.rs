@@ -73,3 +73,6 @@ pub async fn verify_device(user_id: OwnedUserId, device_id: OwnedDeviceId) -> cr
         .await
         .map_err(|e| crate::Error::Anyhow(e))
 }
+
+// Re-exports
+pub use crate::seshat::commands::search_event_index;

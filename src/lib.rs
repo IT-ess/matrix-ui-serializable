@@ -31,6 +31,7 @@ pub(crate) mod events;
 pub(crate) mod init;
 pub mod models;
 pub(crate) mod room;
+pub(crate) mod seshat;
 pub(crate) mod stores;
 pub(crate) mod user;
 pub(crate) mod utils;

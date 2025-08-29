@@ -1,8 +1,9 @@
 use anyhow::anyhow;
+use seshat::Database;
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use matrix_sdk::{Client, ruma::OwnedRoomId};
@@ -147,4 +148,12 @@ pub async fn get_verification_response_receiver_lock<'a>() -> anyhow::Result<
         .get()
         .ok_or(anyhow!("The verification response receiver is not yet set"))?;
     Ok(recv.lock().await)
+}
+
+// Seshat
+
+pub static SESHAT_DATABASE: OnceLock<Arc<Mutex<Database>>> = OnceLock::new();
+
+pub fn get_seshat_db_lock() -> Option<Arc<Mutex<Database>>> {
+    SESHAT_DATABASE.get().cloned()
 }
