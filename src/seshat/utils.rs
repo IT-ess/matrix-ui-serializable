@@ -13,21 +13,28 @@ pub fn sync_to_seshat_event(
     sync_event: SyncRoomMessageEvent,
     room_id: OwnedRoomId,
 ) -> seshat::Event {
-    let body = sync_event
+    let content = sync_event
         .as_original()
         .unwrap() // TODO: make it safe, because if redacted it will fail
         .content
-        .body()
-        .to_string();
+        .clone();
     let mut source_json = JsonObject::new();
     source_json.insert(
         "body".to_string(),
-        serde_json::to_value(body.clone()).expect("couldn't serialize body value"),
+        serde_json::to_value(content.body()).expect("couldn't serialize body value"),
+    );
+    source_json.insert(
+        "event_id".to_string(),
+        serde_json::to_value(sync_event.event_id()).expect("couldn't serialize event_id value"),
+    );
+    source_json.insert(
+        "user_id".to_string(),
+        serde_json::to_value(sync_event.sender()).expect("couldn't serialize event_id value"),
     );
 
     seshat::Event {
         event_type: seshat::EventType::Message, // We only index messages for now
-        content_value: body,
+        content_value: content.body().to_string(),
         msgtype: Some(sync_event.event_type().to_string()),
         event_id: sync_event.event_id().to_string(),
         sender: sync_event.sender().to_string(),

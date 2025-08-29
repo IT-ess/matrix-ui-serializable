@@ -76,3 +76,4 @@ pub async fn verify_device(user_id: OwnedUserId, device_id: OwnedDeviceId) -> cr
 
 // Re-exports
 pub use crate::seshat::commands::search_event_index;
+pub use seshat::{SearchBatch, SearchConfig};
