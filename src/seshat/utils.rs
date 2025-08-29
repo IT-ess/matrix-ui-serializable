@@ -1,11 +1,42 @@
+use matrix_sdk::ruma::{
+    OwnedRoomId, events::room::message::SyncRoomMessageEvent, serde::JsonObject,
+};
 use seshat::{
-    CheckpointDirection, CrawlerCheckpoint, Error as SeshatError, Event, EventType, Profile,
-    RecoveryDatabase, SearchConfig, SearchResult,
+    CheckpointDirection, CrawlerCheckpoint, Error as SeshatError, Profile, RecoveryDatabase,
+    SearchResult,
 };
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use uuid::Uuid;
+
+pub fn sync_to_seshat_event(
+    sync_event: SyncRoomMessageEvent,
+    room_id: OwnedRoomId,
+) -> seshat::Event {
+    let body = sync_event
+        .as_original()
+        .unwrap() // TODO: make it safe, because if redacted it will fail
+        .content
+        .body()
+        .to_string();
+    let mut source_json = JsonObject::new();
+    source_json.insert(
+        "body".to_string(),
+        serde_json::to_value(body.clone()).expect("couldn't serialize body value"),
+    );
+
+    seshat::Event {
+        event_type: seshat::EventType::Message, // We only index messages for now
+        content_value: body,
+        msgtype: Some(sync_event.event_type().to_string()),
+        event_id: sync_event.event_id().to_string(),
+        sender: sync_event.sender().to_string(),
+        server_ts: sync_event.origin_server_ts().0.into(),
+        room_id: room_id.to_string(),
+        source: serde_json::to_string(&source_json)
+            .expect("couldn't serialize source json to string"),
+    }
+}
 
 // Helper function for the manual reindex logic (can be kept separate or inlined)
 // This function now takes ownership of RecoveryDatabase and closes it.

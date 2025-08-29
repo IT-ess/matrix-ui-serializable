@@ -151,7 +151,7 @@ pub async fn delete_event_index() -> anyhow::Result<()> {
 
 pub async fn add_event_to_index(
     event: seshat::Event,
-    profile: Option<seshat::Profile>,
+    profile: seshat::Profile,
 ) -> anyhow::Result<()> {
     println!("[Seshat command] add_event_to_index");
     let state_guard = get_seshat_db_lock();
@@ -159,13 +159,13 @@ pub async fn add_event_to_index(
     if let Some(ref db) = state_guard {
         let db_lock = db.lock().unwrap();
         // let event = parse_event(&event)?;
-        let profile = match profile {
-            Some(p) => p,
-            None => Profile {
-                displayname: None,
-                avatar_url: None,
-            },
-        };
+        // let profile = match profile {
+        //     Some(p) => p,
+        //     None => Profile {
+        //         displayname: None,
+        //         avatar_url: None,
+        //     },
+        // };
         println!("[Seshat command] add_event_to_index event {event:?}");
         println!("[Seshat command] add_event_to_index profile {profile:?}");
         db_lock.add_event(event, profile);

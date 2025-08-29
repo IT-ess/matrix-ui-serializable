@@ -4,12 +4,12 @@ use serde::{Serialize, ser::Serializer};
 use tokio::{runtime::Handle, sync::broadcast};
 
 use crate::{
-    init::singletons::{
-        CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
-        VERIFICATION_RESPONSE_RECEIVER,
-    },
     init::{
         session::try_restore_session_to_state,
+        singletons::{
+            CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
+            VERIFICATION_RESPONSE_RECEIVER,
+        },
         workers::{async_main_loop, async_worker},
     },
     models::{
@@ -208,6 +208,11 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
         let mut ui_event_receiver =
             crate::init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
+
+        // Init seshat
+        seshat::commands::init_event_index("password".to_string())
+            .await
+            .expect("Couldn't init seshat index");
 
         // Spawn the actual async worker thread.
         let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));

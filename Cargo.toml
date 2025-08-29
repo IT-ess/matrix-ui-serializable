@@ -40,4 +40,3 @@ rand = "0.9.2"
 seshat = { git = "https://github.com/IT-ess/seshat.git", branch = "main_tchap", features = [
     "bundled-sqlcipher",
 ] }
-uuid = "1.18.0"
