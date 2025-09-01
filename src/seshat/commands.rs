@@ -156,14 +156,6 @@ pub async fn add_event_to_index(
 
     if let Some(ref db) = state_guard {
         let db_lock = db.lock().unwrap();
-        // let event = parse_event(&event)?;
-        // let profile = match profile {
-        //     Some(p) => p,
-        //     None => Profile {
-        //         displayname: None,
-        //         avatar_url: None,
-        //     },
-        // };
         println!("[Seshat command] add_event_to_index event {event:?}");
         println!("[Seshat command] add_event_to_index profile {profile:?}");
         db_lock.add_event(event, profile);
@@ -201,40 +193,15 @@ pub async fn search_event_index(
     let state_guard = get_seshat_db_lock();
 
     if let Some(ref db) = state_guard {
-        // let (term, config) = parse_search_object(&search_config)?;
         println!("---- search_event_index config {search_config:?}");
         println!("---- search_event_index term {search_term:?}");
         let db_lock: std::sync::MutexGuard<'_, Database> = db.lock().unwrap();
         let result = db_lock.search(&search_term, &search_config).unwrap();
 
         Ok(result)
-
-        // let results: Vec<serde_json::Value> = result
-        //     .results
-        //     .into_iter()
-        //     .map(|element| search_result_to_json(element).unwrap_or(serde_json::Value::Null))
-        //     .collect();
-
-        // let mut search_result = serde_json::json!({
-        //     "count": result.count,
-        //     "results": results,
-        //     "highlights": [],
-        // });
-
-        // if let Some(next_batch) = result.next_batch {
-        //     search_result["next_batch"] = serde_json::json!(next_batch.hyphenated().to_string());
-        // }
-
-        // println!("[Seshat command] search_event_index result {search_result:?}");
-        // Ok(search_result)
     } else {
-        Ok(SearchBatch::default()) // TODO, replace by an error ?
-        // println!("[Seshat command] search_event_index result no database found");
-        // Ok(serde_json::json!({
-        //     "count": 0,
-        //     "results": [],
-        //     "highlights": [],
-        // }))
+        println!("[Seshat command] search_event_index result no database found");
+        Err(anyhow::Error::msg("No seshat database found"))
     }
 }
 
@@ -279,11 +246,6 @@ pub async fn add_historic_events(
 
     if let Some(ref db) = state_guard {
         let db_lock: std::sync::MutexGuard<'_, Database> = db.lock().unwrap();
-        // let (events, new_cp, old_cp) = add_historic_events_helper(
-        //     events.as_ref(),
-        //     new_checkpoint.as_ref(),
-        //     old_checkpoint.as_ref(),
-        // )?;
 
         let receiver = db_lock.add_historic_events(events, new_checkpoint, old_checkpoint);
 
@@ -336,8 +298,6 @@ pub async fn remove_crawler_checkpoint(
 
     if let Some(ref db) = state_guard {
         let db_lock = db.lock().unwrap();
-        // let (_, _, cp) =
-        //     add_historic_events_helper(Vec::new().as_ref(), None, checkpoint.as_ref())?;
         let receiver = db_lock.add_historic_events(Vec::new(), None, checkpoint);
 
         receiver
@@ -361,8 +321,6 @@ pub async fn add_crawler_checkpoint(checkpoint: Option<CrawlerCheckpoint>) -> an
 
     if let Some(ref db) = state_guard {
         let db_lock = db.lock().unwrap();
-        // let (_, cp, _) =
-        //     add_historic_events_helper(Vec::new().as_ref(), checkpoint.as_ref(), None)?;
 
         println!("[Debug] Processed checkpoint for adding: {checkpoint:?}");
         let receiver = db_lock.add_historic_events(Vec::new(), checkpoint, None);
@@ -392,53 +350,10 @@ pub async fn load_file_events(load_config: LoadConfig) -> anyhow::Result<Vec<(St
     let state_guard = get_seshat_db_lock();
 
     if let Some(ref db) = state_guard {
-        // let room_id = load_config.get("roomId").unwrap();
-        // let mut config = LoadConfig::new(room_id.to_string());
-
-        // if let Some(e) = load_config.get("fromEvent") {
-        //     config = config.from_event(e.to_string());
-        // };
-
-        // if let Some(d) = load_config.get("direction") {
-        //     let d_string = d.to_string();
-        //     let direction = match d_string.to_lowercase().as_str() {
-        //         "backwards" | "backward" | "b" => LoadDirection::Backwards,
-        //         "forwards" | "forward" | "f" => LoadDirection::Forwards,
-        //         "" => LoadDirection::Backwards,
-        //         _ => {
-        //             return Err(anyhow!(format!(
-        //                 "No direction found, could not load file event {d_string}"
-        //             )));
-        //         }
-        //     };
-
-        //     config = config.direction(direction);
-        // }
-
         let db_lock = db.lock().unwrap();
         let connection = db_lock.get_connection().unwrap();
         let result = connection.load_file_events(&load_config)?;
         Ok(result)
-        // let mut formatted_result = Vec::new();
-
-        // for (event_str, profile) in result {
-        //     let event = match deserialize_event(&event_str) {
-        //         Ok(event) => event,
-        //         Err(e) => return Err(anyhow!(e.to_string())), // Convert error if needed
-        //     };
-
-        //     let profile = match profile_to_json(profile) {
-        //         Ok(event) => event,
-        //         Err(e) => return Err(anyhow!(e.to_string())), // Convert error if needed
-        //     };
-
-        //     formatted_result.push(serde_json::json!({
-        //         "event": event,
-        //         "profile": profile
-        //     }));
-        // }
-
-        // Ok(formatted_result)
     } else {
         Err(anyhow!("No database found".to_string()))
     }
@@ -456,11 +371,6 @@ pub async fn load_checkpoints() -> anyhow::Result<Vec<CrawlerCheckpoint>> {
         println!("---- load_checkpoints raw results count: {checkpoints:?}");
 
         Ok(checkpoints)
-
-        // // Use the helper function to convert the Vec<CrawlerCheckpoint> to JSON Value
-        // let json_result = checkpoints_to_json(checkpoints)?;
-
-        // Ok(json_result)
     } else {
         Err(anyhow!("No database found".to_string()))
     }

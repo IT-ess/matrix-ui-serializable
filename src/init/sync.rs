@@ -64,7 +64,6 @@ pub async fn sync(
                         add_new_room(&new_room, &room_list_service).await?;
                         all_known_rooms.push_back(new_room.into());
                     }
-                    crate::seshat::commands::commit_live_events().await?;
                 }
                 VectorDiff::Clear => {
                     if LOG_ROOM_LIST_DIFFS {
@@ -80,7 +79,6 @@ pub async fn sync(
                     }
                     add_new_room(&new_room, &room_list_service).await?;
                     all_known_rooms.push_front(new_room.into());
-                    crate::seshat::commands::commit_live_events().await?;
                 }
                 VectorDiff::PushBack { value: new_room } => {
                     if LOG_ROOM_LIST_DIFFS {
@@ -88,7 +86,6 @@ pub async fn sync(
                     }
                     add_new_room(&new_room, &room_list_service).await?;
                     all_known_rooms.push_back(new_room.into());
-                    crate::seshat::commands::commit_live_events().await?;
                 }
                 remove_diff @ VectorDiff::PopFront => {
                     if LOG_ROOM_LIST_DIFFS {
@@ -129,7 +126,6 @@ pub async fn sync(
                     }
                     add_new_room(&new_room, &room_list_service).await?;
                     all_known_rooms.insert(index, new_room.into());
-                    crate::seshat::commands::commit_live_events().await?;
                 }
                 VectorDiff::Set {
                     index,
@@ -144,7 +140,6 @@ pub async fn sync(
                         eprintln!("BUG: room list diff: Set index {index} was out of bounds.");
                     }
                     all_known_rooms.set(index, changed_room.into());
-                    crate::seshat::commands::commit_live_events().await?;
                 }
                 remove_diff @ VectorDiff::Remove {
                     index: remove_index,
@@ -204,6 +199,9 @@ pub async fn sync(
                     all_known_rooms = new_rooms.into_iter().map(|r| r.into()).collect();
                 }
             }
+            // We commit events to db every time there is a change. It shouldn't be expensive if the queue is
+            // empty, but this could be improved.
+            crate::seshat::commands::commit_live_events().await?;
         }
     }
 
