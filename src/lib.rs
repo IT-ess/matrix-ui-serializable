@@ -214,6 +214,14 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
             .await
             .expect("Couldn't init seshat index");
 
+        println!(
+            "IS SESHAT EMPTY: {}",
+            seshat::commands::is_event_index_empty().await.unwrap()
+        );
+        let db_stats = seshat::commands::get_stats().await.unwrap();
+        println!("EVENT_COUNT: {}", db_stats.event_count);
+        println!("ROOM COUNT: {}", db_stats.room_count);
+
         // Spawn the actual async worker thread.
         let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));
 

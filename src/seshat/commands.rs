@@ -29,6 +29,7 @@ pub async fn init_event_index(passphrase: String) -> anyhow::Result<()> {
 
     println!("[Seshat command] init_event_index - passphrase {passphrase:?}");
     let config = Config::new().set_passphrase(passphrase);
+    let config = config.set_language(&seshat::Language::Unknown);
 
     let db_path = TEMP_DIR.get().unwrap().clone().join("seshat_db");
 
