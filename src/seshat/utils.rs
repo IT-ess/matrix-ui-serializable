@@ -12,12 +12,13 @@ use serde_json::Value;
 pub fn sync_to_seshat_event(
     sync_event: SyncRoomMessageEvent,
     room_id: OwnedRoomId,
-) -> seshat::Event {
-    let content = sync_event
-        .as_original()
-        .unwrap() // TODO: make it safe, because if redacted it will fail
-        .content
-        .clone();
+) -> Option<seshat::Event> {
+    let content = if let Some(original) = sync_event.as_original() {
+        original.content.clone()
+    } else {
+        return None;
+    };
+
     let mut source_json = JsonObject::new();
     source_json.insert(
         "body".to_string(),
@@ -28,21 +29,34 @@ pub fn sync_to_seshat_event(
         serde_json::to_value(sync_event.event_id()).expect("couldn't serialize event_id value"),
     );
     source_json.insert(
-        "user_id".to_string(),
-        serde_json::to_value(sync_event.sender()).expect("couldn't serialize event_id value"),
+        "sender_id".to_string(),
+        serde_json::to_value(sync_event.sender()).expect("couldn't serialize sender_id value"),
+    );
+    source_json.insert(
+        "timestamp".to_string(),
+        serde_json::to_value(sync_event.origin_server_ts().get())
+            .expect("couldn't serialize timestamp value"),
+    );
+    source_json.insert(
+        "room_id".to_string(),
+        serde_json::to_value(room_id.to_string()).expect("couldn't serialize room_id value"),
+    );
+    source_json.insert(
+        "msgtype".to_string(),
+        serde_json::to_value(content.msgtype()).expect("couldn't serialize msgtype value"),
     );
 
-    seshat::Event {
+    Some(seshat::Event {
         event_type: seshat::EventType::Message, // We only index messages for now
         content_value: content.body().to_string(),
-        msgtype: Some(sync_event.event_type().to_string()),
+        msgtype: Some(content.msgtype().to_string()),
         event_id: sync_event.event_id().to_string(),
         sender: sync_event.sender().to_string(),
         server_ts: sync_event.origin_server_ts().0.into(),
         room_id: room_id.to_string(),
         source: serde_json::to_string(&source_json)
             .expect("couldn't serialize source json to string"),
-    }
+    })
 }
 
 // Helper function for the manual reindex logic (can be kept separate or inlined)

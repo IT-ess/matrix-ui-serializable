@@ -80,11 +80,19 @@ pub fn add_event_handlers(client: Client) -> anyhow::Result<Client> {
                 }
             };
 
-            let event = sync_to_seshat_event(ev, room.room_id().to_owned());
-            crate::seshat::commands::add_event_to_index(event, profile)
-                .await
-                .expect("Couldn't add event to seshat db");
-            println!("Event added to seshat db");
+            let optional_event = sync_to_seshat_event(ev, room.room_id().to_owned());
+            match optional_event {
+                Some(event) => {
+                    crate::seshat::commands::add_event_to_index(event, profile)
+                        .await
+                        .expect("Couldn't add event to seshat db");
+                    println!("Event added to seshat db")
+                }
+                None => {
+                    println!("Redacted event ignored.");
+                    return;
+                }
+            }
         },
     );
 
