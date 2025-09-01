@@ -15,6 +15,7 @@ use crate::room::invited_room::InvitedRoomInfo;
 
 use super::rooms_list::JoinedRoomInfo;
 
+#[allow(dead_code)]
 static EMPTY_TAGS: Tags = BTreeMap::new();
 
 /// A trait that abstracts the common properties of a room used to filter/sort it.
@@ -95,6 +96,7 @@ impl FilterableRoom for InvitedRoomInfo {
 }
 
 pub type RoomFilterFn = dyn Fn(&(dyn FilterableRoom + Send + Sync)) -> bool + Send + Sync;
+#[allow(dead_code)]
 pub type SortFn = dyn Fn(&(dyn FilterableRoom + Send + Sync), &(dyn FilterableRoom + Send + Sync)) -> Ordering
     + Send
     + Sync;
@@ -156,6 +158,7 @@ impl Default for RoomFilterCriteria {
 }
 
 /// A builder for creating a `RoomDisplayFilter` with a specific set of filter types and a sorting function.
+#[allow(dead_code)]
 pub struct RoomDisplayFilterBuilder {
     _keywords: String,
     _filter_criteria: RoomFilterCriteria,
@@ -176,6 +179,7 @@ pub struct RoomDisplayFilterBuilder {
 ///     .build();
 /// ```
 impl RoomDisplayFilterBuilder {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             _keywords: String::new(),

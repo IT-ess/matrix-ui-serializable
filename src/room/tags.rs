@@ -6,6 +6,7 @@ use serde::{Serialize, Serializer};
 pub struct FrontendRoomTags(Tags);
 
 impl FrontendRoomTags {
+    #[allow(dead_code)]
     pub fn inner(&self) -> &Tags {
         &self.0
     }

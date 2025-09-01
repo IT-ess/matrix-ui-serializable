@@ -6,7 +6,7 @@ use std::{
 use crossbeam_queue::SegQueue;
 use matrix_sdk::{
     room::RoomMember,
-    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId},
+    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId, UserId},
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -227,6 +227,20 @@ pub async fn fetch_user_profile(user_id: OwnedUserId, room_id: Option<OwnedRoomI
             entry.insert(UserProfileCacheEntry::Requested);
             false
         }
+    }
+}
+
+pub async fn get_user_profile_option(user_id: &UserId) -> Option<UserProfile> {
+    let lock = USER_PROFILE_CACHE.read().await;
+    match lock.0.get(user_id) {
+        Some(entry) => match entry {
+            UserProfileCacheEntry::Requested => None,
+            UserProfileCacheEntry::Loaded {
+                user_profile,
+                rooms: _,
+            } => Some(user_profile.clone()),
+        },
+        None => None,
     }
 }
 

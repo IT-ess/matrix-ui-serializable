@@ -1,15 +1,17 @@
 use matrix_sdk::{
-    Client,
+    Client, Room, RoomState,
     ruma::{
         MilliSecondsSinceUnixEpoch, OwnedRoomId,
         events::{
             key::verification::request::ToDeviceKeyVerificationRequestEvent,
-            room::message::{MessageType, OriginalSyncRoomMessageEvent},
+            room::message::{MessageType, OriginalSyncRoomMessageEvent, SyncRoomMessageEvent},
         },
     },
 };
 use matrix_sdk_ui::timeline::EventTimelineItem;
 use tokio::runtime::Handle;
+
+use crate::{seshat::utils::sync_to_seshat_event, user::user_profile::get_user_profile_option};
 
 use super::{
     emoji_verification::request_verification_handler, event_preview::text_preview_of_timeline_item,
@@ -58,6 +60,42 @@ pub fn add_event_handlers(client: Client) -> anyhow::Result<Client> {
             }
         }
     );
+
+    client.add_event_handler(
+        async move |ev: SyncRoomMessageEvent, room: Room, _client: Client| {
+            if room.state() != RoomState::Joined {
+                return;
+            }
+            let user_profile_option = get_user_profile_option(ev.sender()).await;
+
+            let profile = if let Some(user_profile) = user_profile_option {
+                seshat::Profile {
+                    displayname: user_profile.username,
+                    avatar_url: user_profile.avatar_url.map(|s| s.to_string()),
+                }
+            } else {
+                seshat::Profile {
+                    displayname: None,
+                    avatar_url: None,
+                }
+            };
+
+            let optional_event = sync_to_seshat_event(ev, room.room_id().to_owned());
+            match optional_event {
+                Some(event) => {
+                    crate::seshat::commands::add_event_to_index(event, profile)
+                        .await
+                        .expect("Couldn't add event to seshat db");
+                    println!("Event added to seshat db")
+                }
+                None => {
+                    println!("Redacted event ignored.");
+                    return;
+                }
+            }
+        },
+    );
+
     Ok(client)
 }
 

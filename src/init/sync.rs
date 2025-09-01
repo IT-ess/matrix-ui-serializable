@@ -199,6 +199,9 @@ pub async fn sync(
                     all_known_rooms = new_rooms.into_iter().map(|r| r.into()).collect();
                 }
             }
+            // We commit events to db every time there is a change. It shouldn't be expensive if the queue is
+            // empty, but this could be improved.
+            crate::seshat::commands::commit_live_events().await?;
         }
     }
 
