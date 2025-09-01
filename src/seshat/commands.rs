@@ -116,13 +116,10 @@ pub async fn close_event_index() -> anyhow::Result<()> {
                 let db_inner = mutex.into_inner().unwrap(); // Extract the database
                 // The shutdown meethod needs to take ownership
                 db_inner.shutdown();
-                // set the database to none
-                state = None;
                 Ok(())
             }
             Err(_arc) => {
                 println!("Failed to take ownership: Database is still shared.");
-                state = Some(_arc); // Restore the database if shutdown failed
                 Ok(())
             }
         }
