@@ -637,7 +637,7 @@ pub fn update_latest_event(
                         (timeline_update_sender, current_user_id())
                     {
                         match sender.send(TimelineUpdate::UserPowerLevels(UserPowerLevels::from(
-                            &content.clone().into(),
+                            &content.clone(),
                             &user_id,
                         ))) {
                             Ok(_) => {

@@ -18,7 +18,7 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::notifications::enqueue_toast_notification,
-    user::user_power_level::UserPowerLevels,
+    user::user_power_level::{FrontendUserPowerLevel, UserPowerLevels},
     utils::room_name_or_id,
 };
 
@@ -248,7 +248,7 @@ impl RoomScreen {
                                 name: member.name().to_string(),
                                 display_name_ambiguous: member.name_ambiguous(),
                                 is_ignored: member.is_ignored(),
-                                max_power_level: member.normalized_power_level(),
+                                max_power_level: member.normalized_power_level().into(),
                             },
                         );
                     });
@@ -512,7 +512,8 @@ fn find_new_item_matching_current_item(
 #[derive(Debug, Clone, Serialize)]
 pub struct FrontendRoomMember {
     name: String,
-    max_power_level: i64,
+    #[serde(flatten)]
+    max_power_level: FrontendUserPowerLevel,
     display_name_ambiguous: bool,
     is_ignored: bool,
 }

@@ -5,7 +5,7 @@ use futures::{StreamExt, pin_mut};
 use matrix_sdk::{
     Client, RoomMemberships,
     ruma::{
-        OwnedRoomId, RoomOrAliasId,
+        OwnedMxcUri, OwnedRoomId, RoomOrAliasId,
         api::client::{
             receipt::create_receipt::v3::ReceiptType, user_directory::search_users::v3::User,
         },
@@ -409,9 +409,15 @@ pub async fn async_worker(
                             if let Ok(response) = client.account().fetch_user_profile_of(&user_id).await {
                                 update = Some(UserProfileUpdate::UserProfileOnly(
                                     UserProfile {
-                                        username: response.displayname,
+                                        username: response.get("displayname").map(|value| value.as_str().unwrap().to_string()),
                                         user_id: user_id.clone(),
-                                        avatar_url: response.avatar_url,
+                                        avatar_url: response.get("avatar_url").map(|value| {
+                                            let res = OwnedMxcUri::try_from(value.as_str().unwrap().to_string());
+                                            match res {
+                                                Ok(uri) => uri,
+                                                Err(e) => panic!("wrong mxcuri sent ! {e}")
+                                            }
+                                        })
                                     }
                                 ));
                             } else {
@@ -422,7 +428,7 @@ pub async fn async_worker(
                         match update.as_mut() {
                             Some(UserProfileUpdate::Full { new_profile: UserProfile { username, .. }, .. }) if username.is_none() => {
                                 if let Ok(response) = client.account().fetch_user_profile_of(&user_id).await {
-                                    *username = response.displayname;
+                                    *username = response.get("displayname").map(|value| value.as_str().unwrap().to_string());
                                 }
                             }
                             _ => { }
@@ -698,7 +704,10 @@ pub async fn async_worker(
                 let _send_message_task = Handle::current().spawn(async move {
                     println!("Sending message to room {room_id}: {message:?}...");
                     if let Some(replied_to_info) = replied_to {
-                        match timeline.send_reply(message.into(), replied_to_info).await {
+                        match timeline
+                            .send_reply(message.into(), replied_to_info.event_id)
+                            .await
+                        {
                             Ok(_send_handle) => println!("Sent reply message to room {room_id}."),
                             Err(_e) => {
                                 eprintln!("Failed to send reply message to room {room_id}: {_e:?}");
@@ -804,7 +813,7 @@ pub async fn async_worker(
                         Ok(power_levels) => {
                             println!("Successfully fetched power levels for room {room_id}.");
                             if let Err(e) = sender.send(TimelineUpdate::UserPowerLevels(
-                                UserPowerLevels::from(&power_levels, &user_id),
+                                UserPowerLevels::from(&power_levels.try_into().unwrap(), &user_id),
                             )) {
                                 eprintln!(
                                     "Failed to send the result of if user can send message: {e}"

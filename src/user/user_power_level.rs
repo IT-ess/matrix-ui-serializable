@@ -1,7 +1,9 @@
+use std::ops::{Deref, DerefMut};
+
 use bitflags::bitflags;
 use matrix_sdk::ruma::{
-    UserId,
-    events::{MessageLikeEventType, StateEventType, room::power_levels::RoomPowerLevels},
+    Int, UserId,
+    events::room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
 };
 use serde::{Serialize, Serializer};
 
@@ -75,9 +77,12 @@ bitflags! {
     }
 }
 impl UserPowerLevels {
-    pub fn from(power_levels: &RoomPowerLevels, user_id: &UserId) -> Self {
+    pub fn from(power_levels: &RoomPowerLevelsEventContent, user_id: &UserId) -> Self {
         let mut retval = UserPowerLevels::empty();
-        let user_power = power_levels.for_user(user_id);
+        let user_power = power_levels
+            .users
+            .get(user_id)
+            .map_or(Int::default(), |f| f.to_owned());
         retval.set(UserPowerLevels::Ban, user_power >= power_levels.ban);
         retval.set(UserPowerLevels::Invite, user_power >= power_levels.invite);
         retval.set(UserPowerLevels::Kick, user_power >= power_levels.kick);
@@ -88,31 +93,59 @@ impl UserPowerLevels {
         );
         retval.set(
             UserPowerLevels::Location,
-            user_power >= power_levels.for_message(MessageLikeEventType::Location),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::Location)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::Message,
-            user_power >= power_levels.for_message(MessageLikeEventType::Message),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::Message)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::Reaction,
-            user_power >= power_levels.for_message(MessageLikeEventType::Reaction),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::Reaction)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::RoomMessage,
-            user_power >= power_levels.for_message(MessageLikeEventType::RoomMessage),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomMessage)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::RoomRedaction,
-            user_power >= power_levels.for_message(MessageLikeEventType::RoomRedaction),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomRedaction)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::Sticker,
-            user_power >= power_levels.for_message(MessageLikeEventType::Sticker),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::Sticker)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval.set(
             UserPowerLevels::RoomPinnedEvents,
-            user_power >= power_levels.for_state(StateEventType::RoomPinnedEvents),
+            user_power
+                >= power_levels
+                    .events
+                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomPinnedEvents)
+                    .map_or(Int::default(), |f| f.to_owned()),
         );
         retval
     }
@@ -218,5 +251,54 @@ impl Serialize for UserPowerLevels {
         }
 
         seq.end()
+    }
+}
+
+// New type pattern to add the msgtype field to serialization
+#[derive(Debug, Clone)]
+pub struct FrontendUserPowerLevel(UserPowerLevel);
+
+impl Deref for FrontendUserPowerLevel {
+    type Target = UserPowerLevel;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for FrontendUserPowerLevel {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<UserPowerLevel> for FrontendUserPowerLevel {
+    fn from(lvl: UserPowerLevel) -> Self {
+        FrontendUserPowerLevel(lvl)
+    }
+}
+
+impl Serialize for FrontendUserPowerLevel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("FrontendUserPowerLevel", 1)?;
+
+        match **self {
+            UserPowerLevel::Infinite => {
+                state.serialize_field("userPowerLevel", &true)?;
+            }
+            UserPowerLevel::Int(i) => {
+                state.serialize_field("userPowerLevel", &i)?;
+            }
+            _ => {
+                state.serialize_field("userPowerLevel", &0)?;
+            }
+        }
+
+        state.end()
     }
 }

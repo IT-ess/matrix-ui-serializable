@@ -15,14 +15,14 @@ serde = "1.0"
 thiserror = "2"
 serde_json = "1.0.142"
 anyhow = "1.0.98"
-matrix-sdk = { version = "0.13.0", default-features = false, features = [
+matrix-sdk = { version = "0.14.0", default-features = false, features = [
     "anyhow",
     "bundled-sqlite",
     "rustls-tls",
     "e2e-encryption",
     "automatic-room-key-forwarding",
 ] }
-matrix-sdk-ui = { version = "0.13.0", default-features = false, features = [
+matrix-sdk-ui = { version = "0.14.0", default-features = false, features = [
     "rustls-tls",
 ] }
 futures-util = "0.3.31"
