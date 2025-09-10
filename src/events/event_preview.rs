@@ -103,6 +103,10 @@ pub fn text_preview_of_timeline_item(
                     String::from("[Unable to decrypt message]"),
                     BeforeText::UsernameWithColon,
                 )),
+                MsgLikeKind::Other(_other) => TextPreview::from((
+                    String::from("[Custom Message format]"),
+                    BeforeText::Nothing,
+                )),
             }
         }
         TimelineItemContent::MembershipChange(membership_change) => {
@@ -161,6 +165,7 @@ pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> St
                             .unwrap_or_else(|| poll_state.results().question)
                     )
                 }
+                MsgLikeKind::Other(_) => "[Custom format]".into(),
             }
         }
         TimelineItemContent::MembershipChange(membership_change) => {
