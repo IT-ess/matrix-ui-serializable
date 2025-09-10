@@ -14,7 +14,11 @@ use crate::{
         tags::FrontendRoomTags,
     },
 };
-use matrix_sdk::{RoomState, event_handler::EventHandlerDropGuard, ruma::OwnedRoomId};
+use matrix_sdk::{
+    RoomState,
+    event_handler::EventHandlerDropGuard,
+    ruma::{OwnedRoomId, events::TimelineEventType},
+};
 use matrix_sdk_ui::{
     RoomListService, Timeline,
     timeline::{EventTimelineItem, RoomExt},
@@ -204,16 +208,26 @@ pub async fn add_new_room(
         return Ok(());
     }
 
-    let timeline = if let Ok(tl) = room.timeline().await {
-        Arc::new(tl)
-    } else {
-        Arc::new(
-            room.timeline_builder()
-                .track_read_marker_and_receipts()
-                .build()
-                .await?,
-        )
-    };
+    // let timeline = if let Ok(tl) = room.timeline().await {
+    //     Arc::new(tl)
+    // } else {
+    let timeline = Arc::new(
+        room.timeline_builder()
+            .track_read_marker_and_receipts()
+            .event_filter(|event, room_version| {
+                println!("Event filter called with: {:?}", event.event_type());
+                println!("Event content: {:?}", event);
+                if event.event_type() == TimelineEventType::from("refs.room.recommendation") {
+                    println!("JE RETOURNE TROUE");
+                    return true;
+                } else {
+                    return matrix_sdk_ui::timeline::default_event_filter(event, room_version);
+                };
+            })
+            .build()
+            .await?,
+    );
+    // };
     let latest_event = timeline.latest_event().await;
     let (timeline_update_sender, timeline_update_receiver) = crossbeam_channel::unbounded();
 

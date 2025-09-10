@@ -2024,8 +2024,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdfa71339f867dcada2e7f1130f858fd8892088b1a4c123dd50a99ed2399ab22"
 dependencies = [
  "anyhow",
  "anymap2",
@@ -2109,8 +2107,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-common"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdb33a986495135e217f28cfe0918bf7d01a9800e42f4ef88afbd48e23b8cc53"
 dependencies = [
  "eyeball-im",
  "futures-core",
@@ -2133,8 +2129,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-crypto"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61bf6c3195de301c98339283413a4e9d9d63c4f214ef8955147643caab161256"
 dependencies = [
  "aes",
  "aquamarine",
@@ -2174,8 +2168,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-indexeddb"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2752015e69b6b56a8df72e52f91a834771259f755eb1c65232b77348ffb16b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2204,8 +2196,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-sqlite"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "662a128004b553196365d88ea46917047d7350a24dfe7ce829e7b78636673604"
 dependencies = [
  "as_variant",
  "async-trait",
@@ -2230,8 +2220,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-store-encryption"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e0aac550e685306fbbd57faae8f98af9812f19bbf0f83da7559d67cf4789679"
 dependencies = [
  "base64",
  "blake3",
@@ -2250,8 +2238,6 @@ dependencies = [
 [[package]]
 name = "matrix-sdk-ui"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f11354688a758f1b20b9d057553d76c288670d538aae824ac3eb63df07a8b380"
 dependencies = [
  "as_variant",
  "async-rx",

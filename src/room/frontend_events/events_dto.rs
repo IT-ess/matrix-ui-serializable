@@ -180,6 +180,24 @@ pub fn to_frontend_timeline_item<'a>(
                                 }),
                             };
                         }
+                        MsgLikeKind::Other(other) => {
+                            // let test = other.raw_event();
+                            return FrontendTimelineItem {
+                                event_id,
+                                is_local,
+                                is_own,
+                                timestamp,
+                                abilities,
+                                data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
+                                    edited: false,
+                                    reactions: FrontendReactionsByKeyBySender(&msg_like.reactions),
+                                    sender_id,
+                                    sender,
+                                    thread_root,
+                                    kind: FrontendMsgLikeKind::Unknown,
+                                }),
+                            };
+                        }
                     }
                 }
                 TimelineItemContent::OtherState(state) => {
