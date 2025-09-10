@@ -32,6 +32,10 @@ impl MatrixClientConfig {
             client_name,
         }
     }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
 }
 
 /// Details of a login request that get submitted when calling login command
