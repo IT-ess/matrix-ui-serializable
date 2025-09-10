@@ -146,6 +146,9 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .set(config.temp_dir)
         .expect("Couldn't set temporary dir");
 
+    // Wait for frontend to be ready before proceeding with the init.
+    LOGIN_STORE_READY.wait();
+    println!("FRONTEND IS READY");
     let _monitor = Handle::current().spawn(async move {
         let client = try_restore_session_to_state(
             config.session_option,
@@ -154,7 +157,6 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .await
         .expect("Couldn't try to restore session");
 
-        LOGIN_STORE_READY.wait();
         let client = match client {
             Some(new_login) => {
                 let _ = &config
