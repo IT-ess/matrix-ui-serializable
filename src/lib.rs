@@ -150,6 +150,19 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     LOGIN_STORE_READY.wait();
     println!("FRONTEND IS READY");
     let _monitor = Handle::current().spawn(async move {
+        // Init seshat first
+        seshat::commands::init_event_index("password".to_string()) // TODO: add to config. This password is used for encryption only, that is deactivated for now anyway.
+            .await
+            .expect("Couldn't init seshat index");
+
+        println!(
+            "IS SESHAT EMPTY: {}",
+            seshat::commands::is_event_index_empty().await.unwrap()
+        );
+        let db_stats = seshat::commands::get_stats().await.unwrap();
+        println!("SESHAT EVENT COUNT: {}", db_stats.event_count);
+        println!("SESHAT ROOM COUNT: {}", db_stats.room_count);
+
         let client = try_restore_session_to_state(
             config.session_option,
             config.mobile_push_notifications_config,
@@ -210,19 +223,6 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
         let mut ui_event_receiver =
             crate::init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
-
-        // Init seshat
-        seshat::commands::init_event_index("password".to_string()) // TODO: add to config. This password is used for encryption only, that is deactivated for now anyway.
-            .await
-            .expect("Couldn't init seshat index");
-
-        println!(
-            "IS SESHAT EMPTY: {}",
-            seshat::commands::is_event_index_empty().await.unwrap()
-        );
-        let db_stats = seshat::commands::get_stats().await.unwrap();
-        println!("SESHAT EVENT COUNT: {}", db_stats.event_count);
-        println!("SESHAT ROOM COUNT: {}", db_stats.room_count);
 
         // Spawn the actual async worker thread.
         let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));
