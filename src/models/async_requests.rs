@@ -8,7 +8,9 @@ use matrix_sdk::{
     },
     ruma::{
         OwnedEventId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
-        events::room::message::{ReplyWithinThread, RoomMessageEventContent},
+        events::room::message::{
+            ReplyWithinThread, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
+        },
         matrix_uri::MatrixId,
     },
 };
@@ -210,15 +212,19 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     direction: data.direction,
                 })
             }
-            // "editMessage" => {
-            //     let data: EditMessagePayload =
-            //         serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-            //     Ok(MatrixRequest::EditMessage {
-            //         room_id: data.room_id,
-            //         timeline_event_item_id: data.timeline_event_item_id,
-            //         edited_content: data.edited_content,
-            //     })
-            // }
+            "editMessage" => {
+                let data: EditMessagePayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::EditMessage {
+                    room_id: data.room_id,
+                    // We only use remote event_id for now. Transaction (local) ids could be supported in the future
+                    timeline_event_item_id: TimelineEventItemId::EventId(
+                        data.timeline_event_item_id,
+                    ),
+                    // We only allow editing messages for now.
+                    edited_content: EditedContent::RoomMessage(data.edited_content),
+                })
+            }
             "fetchDetailsForEvent" => {
                 let data: FetchDetailsForEventPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
@@ -362,15 +368,15 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     reaction: data.reaction,
                 })
             }
-            // "redactMessage" => {
-            //     let data: RedactMessagePayload =
-            //         serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-            //     Ok(MatrixRequest::RedactMessage {
-            //         room_id: data.room_id,
-            //         timeline_event_id: data.timeline_event_id,
-            //         reason: data.reason,
-            //     })
-            // }
+            "redactMessage" => {
+                let data: RedactMessagePayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::RedactMessage {
+                    room_id: data.room_id,
+                    timeline_event_id: TimelineEventItemId::EventId(data.timeline_event_id),
+                    reason: data.reason,
+                })
+            }
             // "getMatrixRoomLinkPillInfo" => {
             //     let data: GetMatrixRoomLinkPillInfoPayload =
             //         serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
@@ -390,7 +396,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 event,
                 &[
                     "paginateRoomTimeline",
-                    // "editMessage",
+                    "editMessage",
                     "fetchDetailsForEvent",
                     // "syncRoomMemberList",
                     "joinRoom",
@@ -408,7 +414,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "fullyReadReceipt",
                     "getRoomPowerLevels",
                     "toggleReaction",
-                    // "redactMessage",
+                    "redactMessage",
                     // "getMatrixRoomLinkPillInfo",
                     "createDMRoom",
                 ],
@@ -426,13 +432,13 @@ struct PaginateRoomTimelinePayload {
     direction: PaginationDirection,
 }
 
-// #[derive(Deserialize)]
-// #[serde(rename_all = "camelCase")]
-// struct EditMessagePayload {
-//     room_id: OwnedRoomId,
-//     timeline_event_item_id: TimelineEventItemId,
-//     edited_content: EditedContent,
-// }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditMessagePayload {
+    room_id: OwnedRoomId,
+    timeline_event_item_id: OwnedEventId,
+    edited_content: RoomMessageEventContentWithoutRelation,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -546,13 +552,13 @@ struct ToggleReactionPayload {
     reaction: String,
 }
 
-// #[derive(Deserialize)]
-// #[serde(rename_all = "camelCase")]
-// struct RedactMessagePayload {
-//     room_id: OwnedRoomId,
-//     timeline_event_id: TimelineEventItemId,
-//     reason: Option<String>,
-// }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RedactMessagePayload {
+    room_id: OwnedRoomId,
+    timeline_event_id: OwnedEventId,
+    reason: Option<String>,
+}
 
 // #[derive(Deserialize)]
 // #[serde(rename_all = "camelCase")]
