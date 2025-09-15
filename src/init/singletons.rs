@@ -66,7 +66,7 @@ pub struct GlobalBroadcaster {
     sender: broadcast::Sender<UIUpdateMessage>,
 }
 
-pub static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
+pub static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 impl GlobalBroadcaster {
     fn new(capacity: usize) -> Self {

@@ -7,7 +7,7 @@ use crate::{
     init::{
         session::try_restore_session_to_state,
         singletons::{
-            CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER, TEMP_DIR,
+            APP_DATA_DIR, CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER,
             VERIFICATION_RESPONSE_RECEIVER,
         },
         workers::{async_main_loop, async_worker},
@@ -91,7 +91,7 @@ pub struct LibConfig {
     /// The required configuration for mobile push notifications to work
     mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
     /// A PathBuf to the temporary dir of the app
-    temp_dir: PathBuf,
+    app_data_dir: PathBuf,
 }
 
 impl LibConfig {
@@ -100,14 +100,14 @@ impl LibConfig {
         mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
         event_receivers: EventReceivers,
         session_option: Option<String>,
-        temp_dir: PathBuf,
+        app_data_dir: PathBuf,
     ) -> Self {
         Self {
             updaters,
             mobile_push_notifications_config,
             event_receivers,
             session_option,
-            temp_dir,
+            app_data_dir,
         }
     }
 }
@@ -142,8 +142,8 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .set(sender)
         .expect("BUG: REQUEST_SENDER already set!");
 
-    TEMP_DIR
-        .set(config.temp_dir)
+    APP_DATA_DIR
+        .set(config.app_data_dir)
         .expect("Couldn't set temporary dir");
 
     // Wait for frontend to be ready before proceeding with the init.

@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use crate::init::singletons::{SESHAT_DATABASE, TEMP_DIR, get_seshat_db_lock};
+use crate::init::singletons::{APP_DATA_DIR, SESHAT_DATABASE, get_seshat_db_lock};
 
 use super::utils::perform_manual_reindex;
 
@@ -31,7 +31,7 @@ pub async fn init_event_index(passphrase: String) -> anyhow::Result<()> {
     let config = Config::new().set_passphrase(passphrase);
     let config = config.set_language(&seshat::Language::Unknown);
 
-    let db_path = TEMP_DIR.get().unwrap().clone().join("seshat_db");
+    let db_path = APP_DATA_DIR.get().unwrap().clone().join("seshat_db");
 
     println!("[Seshat command] init_event_index - db_path {:?}", &db_path);
 
@@ -133,7 +133,7 @@ pub async fn close_event_index() -> anyhow::Result<()> {
 pub async fn delete_event_index() -> anyhow::Result<()> {
     println!("[Seshat command] delete_event_index");
     // The app_handle is a method introduce by tauri
-    let db_path = TEMP_DIR.get().unwrap().clone().join("seshat_db");
+    let db_path = APP_DATA_DIR.get().unwrap().clone().join("seshat_db");
 
     // Handle the case where the directory doesn't exist
     match fs::remove_dir_all(&db_path) {
