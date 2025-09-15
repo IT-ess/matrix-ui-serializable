@@ -2,6 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
 use matrix_sdk::ruma::{
+    OwnedEventId, OwnedUserId,
     events::{
         room::message::{
             AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent,
@@ -11,10 +12,9 @@ use matrix_sdk::ruma::{
         },
         sticker::{StickerEventContent, StickerMediaSource},
     },
-    OwnedEventId, OwnedUserId,
 };
 use matrix_sdk_ui::timeline::{ReactionInfo, ReactionStatus, ReactionsByKeyBySender};
-use serde::{ser::SerializeMap, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeMap};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(
@@ -67,7 +67,7 @@ pub enum FrontendMsgLikeKind {
     UnableToDecrypt,
 
     /// An unknown type of message
-    Unknown,
+    Unknown(UnknownMsgLike),
 }
 
 /// A special kind of [`super::TimelineItemContent`] that groups together
@@ -191,4 +191,9 @@ impl Serialize for FrontendStickerEventContent {
         state.serialize_field("msgtype", "m.sticker")?;
         state.end()
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnknownMsgLike {
+    pub event_type: String,
 }

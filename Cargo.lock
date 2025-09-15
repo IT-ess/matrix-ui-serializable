@@ -2078,9 +2078,7 @@ dependencies = [
 
 [[package]]
 name = "matrix-sdk-base"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b14659a7e902ea8a821ec217f36b168fb4c79020d91b912175ac188b6c364225"
+version = "0.14.0"
 dependencies = [
  "as_variant",
  "async-trait",

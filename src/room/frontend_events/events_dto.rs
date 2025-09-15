@@ -10,7 +10,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{
     room::frontend_events::{
-        msg_like::{FrontendReactionsByKeyBySender, FrontendStickerEventContent},
+        msg_like::{FrontendReactionsByKeyBySender, FrontendStickerEventContent, UnknownMsgLike},
         state_event::{
             FrontendAnyOtherFullStateEventContent, FrontendMemberProfileChange,
             FrontendRoomMembershipChange, FrontendStateEvent,
@@ -181,7 +181,6 @@ pub fn to_frontend_timeline_item<'a>(
                             };
                         }
                         MsgLikeKind::Other(other) => {
-                            // let test = other.raw_event();
                             return FrontendTimelineItem {
                                 event_id,
                                 is_local,
@@ -194,7 +193,9 @@ pub fn to_frontend_timeline_item<'a>(
                                     sender_id,
                                     sender,
                                     thread_root,
-                                    kind: FrontendMsgLikeKind::Unknown,
+                                    kind: FrontendMsgLikeKind::Unknown(UnknownMsgLike {
+                                        event_type: other.event_type().to_string(),
+                                    }),
                                 }),
                             };
                         }
@@ -344,7 +345,9 @@ fn map_msg_event_content(content: MessageType) -> FrontendMsgLikeKind {
         MessageType::Notice(c) => FrontendMsgLikeKind::Notice(c),
         MessageType::ServerNotice(c) => FrontendMsgLikeKind::ServerNotice(c),
         MessageType::VerificationRequest(c) => FrontendMsgLikeKind::VerificationRequest(c),
-        _ => FrontendMsgLikeKind::Unknown,
+        _type => FrontendMsgLikeKind::Unknown(UnknownMsgLike {
+            event_type: _type.msgtype().to_string(), // TODO: we mix msg type and event types, not sure it's good.
+        }),
     }
 }
 
