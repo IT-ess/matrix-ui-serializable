@@ -6,14 +6,19 @@ use std::{
 use crossbeam_queue::SegQueue;
 use matrix_sdk::{
     room::RoomMember,
-    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId, UserId},
+    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId},
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
+use tracing::warn;
 
-use crate::models::{
-    async_requests::{MatrixRequest, submit_async_request},
-    state_updater::StateUpdater,
+use crate::{
+    models::{
+        async_requests::{MatrixRequest, submit_async_request},
+        events::{ToastNotificationRequest, ToastNotificationVariant},
+        state_updater::StateUpdater,
+    },
+    room::notifications::enqueue_toast_notification,
 };
 
 use crate::init::singletons::{UIUpdateMessage, broadcast_event};
@@ -32,10 +37,10 @@ pub struct UserProfile {
 impl UserProfile {
     /// Returns the user's displayable name, using the user ID as a fallback.
     pub fn _displayable_name(&self) -> &str {
-        if let Some(un) = self.username.as_ref() {
-            if !un.is_empty() {
-                return un.as_str();
-            }
+        if let Some(un) = self.username.as_ref()
+            && !un.is_empty()
+        {
+            return un.as_str();
         }
         self.user_id.as_str()
     }
@@ -115,7 +120,7 @@ impl UserProfileUpdate {
                     Entry::Occupied(mut entry) => match entry.get_mut() {
                         e @ UserProfileCacheEntry::Requested => {
                             // This shouldn't happen, but we can still technically handle it correctly.
-                            eprintln!(
+                            warn!(
                                 "BUG: User profile cache entry was `Requested` for user {} when handling RoomMemberOnly update",
                                 room_member.user_id()
                             );
@@ -138,7 +143,7 @@ impl UserProfileUpdate {
                     },
                     Entry::Vacant(entry) => {
                         // This shouldn't happen, but we can still technically handle it correctly.
-                        eprintln!(
+                        warn!(
                             "BUG: User profile cache entry not found for user {} when handling RoomMemberOnly update",
                             room_member.user_id()
                         );
@@ -195,7 +200,7 @@ pub async fn process_user_profile_updates(updaters: &Arc<Box<dyn StateUpdater>>)
     let mut updated = false;
     if PENDING_USER_PROFILE_UPDATES.is_empty() {
         return updated; // Return early if the queue is empty to avoid acquiring the lock.
-    };
+    }
     {
         let mut lock = USER_PROFILE_CACHE.write().await;
         while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
@@ -206,9 +211,13 @@ pub async fn process_user_profile_updates(updaters: &Arc<Box<dyn StateUpdater>>)
     } // We drop the write lock here
     if updated {
         let lock = USER_PROFILE_CACHE.read().await;
-        updaters
-            .update_profile(&lock)
-            .expect("Couldn't update profiles frontend state");
+        if let Err(e) = updaters.update_profile(&lock) {
+            enqueue_toast_notification(ToastNotificationRequest::new(
+                format!("Cannot update profiles store. Error: {e}"),
+                None,
+                ToastNotificationVariant::Error,
+            ))
+        }
     }
     updated
 }
@@ -227,20 +236,6 @@ pub async fn fetch_user_profile(user_id: OwnedUserId, room_id: Option<OwnedRoomI
             entry.insert(UserProfileCacheEntry::Requested);
             false
         }
-    }
-}
-
-pub async fn get_user_profile_option(user_id: &UserId) -> Option<UserProfile> {
-    let lock = USER_PROFILE_CACHE.read().await;
-    match lock.0.get(user_id) {
-        Some(entry) => match entry {
-            UserProfileCacheEntry::Requested => None,
-            UserProfileCacheEntry::Loaded {
-                user_profile,
-                rooms: _,
-            } => Some(user_profile.clone()),
-        },
-        None => None,
     }
 }
 

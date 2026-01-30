@@ -6,6 +6,8 @@ use std::{
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
+use tracing::{debug, error, trace, warn};
+use ts_rs::TS;
 
 use crate::{
     events::timeline::{
@@ -24,7 +26,8 @@ use crate::{
 
 /// A serializable struct representing the state of a given Matrix Room.
 /// Fields are not exposed to the adapter directly, the adapter can only serialize this struct.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomScreen {
     /// The room ID of the currently-shown room.
@@ -72,12 +75,16 @@ impl RoomScreen {
     }
 
     fn update_frontend_state(&self) {
-        self.state_updaters
-            .update_room(self, self.room_id.as_str())
-            .expect(&format!(
-                "Couldn't update frontend store for room {:?}",
-                self.room_name,
+        if let Err(e) = self.state_updaters.update_room(self, self.room_id.as_str()) {
+            enqueue_toast_notification(ToastNotificationRequest::new(
+                format!(
+                    "Cannot update room state for room {}. Error: {e}",
+                    self.room_name
+                ),
+                None,
+                ToastNotificationVariant::Error,
             ))
+        }
     }
 
     /// Processes all pending background updates to the currently-shown timeline.
@@ -103,24 +110,25 @@ impl RoomScreen {
                     new_items,
                     clear_cache,
                 } => {
-                    if new_items.is_empty() {
-                        if !tl.items.is_empty() {
-                            println!(
-                                "Timeline::handle_event(): timeline (had {} items) was cleared for room {}",
-                                tl.items.len(),
-                                tl.room_id
-                            );
-                            // For now, we paginate a cleared timeline in order to be able to show something at least.
-                            // A proper solution would be what's described below, which would be to save a few event IDs
-                            // and then either focus on them (if we're not close to the end of the timeline)
-                            // or paginate backwards until we find them (only if we are close the end of the timeline).
-                            should_continue_backwards_pagination = true;
-                        }
+                    if new_items.is_empty() && !tl.items.is_empty() {
+                        trace!(
+                            "Timeline::handle_event(): timeline (had {} items) was cleared for room {}",
+                            tl.items.len(),
+                            tl.room_id
+                        );
+                        // For now, we paginate a cleared timeline in order to be able to show something at least.
+                        // A proper solution would be what's described below, which would be to save a few event IDs
+                        // and then either focus on them (if we're not close to the end of the timeline)
+                        // or paginate backwards until we find them (only if we are close the end of the timeline).
+                        should_continue_backwards_pagination = true;
                     }
                     if new_items.len() == tl.items.len() {
-                        // println!("Timeline::handle_event(): no jump necessary for updated timeline of same length: {}", items.len());
+                        trace!(
+                            "Timeline::handle_event(): no jump necessary for updated timeline of same length: {}",
+                            tl.items.len()
+                        );
                     } else if curr_first_id > new_items.len() {
-                        println!(
+                        trace!(
                             "Timeline::handle_event(): jumping to bottom: curr_first_id {} is out of bounds for {} new items",
                             curr_first_id,
                             new_items.len()
@@ -135,7 +143,7 @@ impl RoomScreen {
                         )
                     {
                         if curr_item_idx != new_item_idx {
-                            println!(
+                            trace!(
                                 "Timeline::handle_event(): jumping view from event index {curr_item_idx} to new index {new_item_idx}, scroll {new_item_scroll}, event ID {_event_id}"
                             );
                             // Set scrolled_past_read_marker false when we jump to a new event
@@ -146,7 +154,7 @@ impl RoomScreen {
                     // TODO: after an (un)ignore user event, all timelines are cleared. Handle that here.
                     //
                     else {
-                        // eprintln!("!!! Couldn't find new event with matching ID for ANY event currently visible in the portal list");
+                        // warn!("!!! Couldn't find new event with matching ID for ANY event currently visible in the portal list");
                     }
 
                     if clear_cache {
@@ -162,7 +170,7 @@ impl RoomScreen {
                     target_event_id,
                     index,
                 } => {
-                    // println!("Target event found in room {}: {target_event_id}, index: {index}", tl.room_id);
+                    // trace!("Target event found in room {}: {target_event_id}, index: {index}", tl.room_id);
                     tl.request_sender.send_if_modified(|requests| {
                         requests.retain(|r| r.room_id != tl.room_id);
                         // no need to notify/wake-up all receivers for a completed request
@@ -176,13 +184,17 @@ impl RoomScreen {
                             .is_some_and(|ev| ev.event_id() == Some(&target_event_id))
                     });
 
-                    // println!("TargetEventFound: is_valid? {is_valid}. room {}, event {target_event_id}, index {index} of {}\n  --> item: {item:?}", tl.room_id, tl.items.len());
+                    trace!(
+                        "TargetEventFound: is_valid? {is_valid}. room {}, event {target_event_id}, index {index} of {}\n  --> item: {item:?}",
+                        tl.room_id,
+                        tl.items.len()
+                    );
                     if is_valid {
                     } else {
                         // Here, the target event was not found in the current timeline,
                         // or we found it previously but it is no longer in the timeline (or has moved),
                         // which means we encountered an error and are unable to jump to the target event.
-                        eprintln!(
+                        warn!(
                             "Target event index {index} of {} is out of bounds for room {}",
                             tl.items.len(),
                             tl.room_id
@@ -192,18 +204,18 @@ impl RoomScreen {
                     should_continue_backwards_pagination = false;
                 }
                 TimelineUpdate::PaginationRunning(direction) => {
-                    println!(
+                    trace!(
                         "Pagination running in room {} in {direction} direction",
                         tl.room_id
                     );
                     if direction == PaginationDirection::Backwards {
                         self.done_loading = false;
                     } else {
-                        eprintln!("Unexpected PaginationRunning update in the Forwards direction");
+                        warn!("Unexpected PaginationRunning update in the Forwards direction");
                     }
                 }
                 TimelineUpdate::PaginationError { error, direction } => {
-                    eprintln!(
+                    error!(
                         "Pagination error ({direction}) in room {}: {error:?}",
                         tl.room_id
                     );
@@ -221,12 +233,12 @@ impl RoomScreen {
                             self.done_loading = true;
                         }
                     } else {
-                        eprintln!("Unexpected PaginationIdle update in the Forwards direction");
+                        warn!("Unexpected PaginationIdle update in the Forwards direction");
                     }
                 }
                 TimelineUpdate::EventDetailsFetched { event_id, result } => {
                     if let Err(_e) = result {
-                        eprintln!(
+                        warn!(
                             "Failed to fetch details fetched for event {event_id} in room {}. Error: {_e:?}",
                             tl.room_id
                         );
@@ -235,27 +247,30 @@ impl RoomScreen {
                     // but for now we just fall through and let the final `redraw()` call re-draw the whole timeline view.
                 }
                 TimelineUpdate::RoomMembersSynced => {
-                    // println!("Timeline::handle_event(): room members fetched for room {}", tl.room_id);
+                    trace!(
+                        "Timeline::handle_event(): room members fetched for room {}",
+                        tl.room_id
+                    );
                     // Here, to be most efficient, we could redraw only the user avatars and names in the timeline,
                     // but for now we just fall through and let the final `redraw()` call re-draw the whole timeline view.
                 }
                 TimelineUpdate::RoomMembersListFetched { members } => {
-                    println!("RoomMembers list fetched !");
+                    debug!("RoomMembers list fetched !");
                     members.iter().for_each(|member| {
                         self.members.insert(
                             member.user_id().to_owned(),
                             FrontendRoomMember {
-                                name: member.name().to_string(),
+                                name: member.name().to_owned(),
                                 display_name_ambiguous: member.name_ambiguous(),
                                 is_ignored: member.is_ignored(),
                                 max_power_level: member.normalized_power_level().into(),
                             },
                         );
                     });
-                    println!("{:?}", self.members);
+                    debug!("{:?}", self.members);
                 }
                 TimelineUpdate::_MediaFetched => {
-                    println!(
+                    trace!(
                         "Timeline::handle_event(): media fetched for room {}",
                         tl.room_id
                     );
@@ -268,14 +283,14 @@ impl RoomScreen {
                 } => {
                     if result.is_ok() {
                         enqueue_toast_notification(ToastNotificationRequest::new(
-                            format!("Successfully edited message."),
+                            "Successfully edited message.".to_owned(),
                             None,
                             ToastNotificationVariant::Success,
                         ));
                     } else {
-                        eprintln!("Error editing event with id {timeline_event_id:?}");
+                        error!("Error editing event with id {timeline_event_id:?}");
                         enqueue_toast_notification(ToastNotificationRequest::new(
-                            format!("Error while editing event."),
+                            "Error while editing event.".to_owned(),
                             None,
                             ToastNotificationVariant::Error,
                         ));
@@ -296,7 +311,7 @@ impl RoomScreen {
         }
 
         if should_continue_backwards_pagination {
-            println!("Continuing backwards pagination...");
+            trace!("Continuing backwards pagination...");
             submit_async_request(MatrixRequest::PaginateRoomTimeline {
                 room_id: tl.room_id.clone(),
                 num_events: 50,
@@ -305,7 +320,12 @@ impl RoomScreen {
         }
 
         if num_updates > 0 {
-            // println!("Applied {} timeline updates for room {}, redrawing with {} items...", num_updates, tl.room_id, tl.items.len());
+            debug!(
+                "Applied {} timeline updates for room {}, redrawing with {} items...",
+                num_updates,
+                tl.room_id,
+                tl.items.len()
+            );
             self.update_frontend_state();
         }
     }
@@ -350,11 +370,12 @@ impl RoomScreen {
             (new_tl_state, true)
         };
 
+        // TODO: support typing notices in frontend
         // Subscribe to typing notices, but hide the typing notice view initially.
-        submit_async_request(MatrixRequest::SubscribeToTypingNotices {
-            room_id: room_id.clone(),
-            subscribe: true,
-        });
+        // submit_async_request(MatrixRequest::SubscribeToTypingNotices {
+        //     room_id: room_id.clone(),
+        //     subscribe: true,
+        // });
 
         submit_async_request(MatrixRequest::SubscribeToOwnUserReadReceiptsChanged {
             room_id: room_id.clone(),
@@ -364,21 +385,19 @@ impl RoomScreen {
         // because we want to show the user some messages as soon as possible
         // when they first open the room, and there might not be any messages yet.
         if first_time_showing_room && !tl_state.fully_paginated {
-            println!(
+            debug!(
                 "Sending a first-time backwards pagination request for room {}",
                 room_id
             );
             submit_async_request(MatrixRequest::PaginateRoomTimeline {
                 room_id: room_id.clone(),
-                num_events: 50,
+                num_events: 20,
                 direction: PaginationDirection::Backwards,
             });
         }
 
         // This fetches the room members of the displayed timeline.
-        submit_async_request(MatrixRequest::SyncRoomMemberList {
-            room_id: room_id.clone(),
-        });
+        submit_async_request(MatrixRequest::SyncRoomMemberList { room_id });
 
         // As the final step, store the tl_state for this room into this RoomScreen widget,
         // such that it can be accessed in future event/draw handlers.
@@ -420,7 +439,7 @@ impl RoomScreen {
     /// Note: after calling this function, the widget's `tl_state` will be `None`.
     fn save_state(&mut self) {
         let Some(tl) = self.tl_state.take() else {
-            eprintln!(
+            warn!(
                 "Timeline::save_state(): skipping due to missing state, room {:?}",
                 self.room_id
             );
@@ -446,7 +465,7 @@ impl RoomScreen {
 
         self.hide_timeline();
         self.room_name = room_name_or_id(room_name.into(), &room_id);
-        self.room_id = room_id.clone();
+        self.room_id = room_id;
 
         self.show_timeline();
     }
@@ -498,7 +517,7 @@ fn find_new_item_matching_current_item(
             // some may be zeroed-out, so we need to account for that possibility by only
             // using events that have a real non-zero area
             if let Some(pos_offset) = position_of_item {
-                println!(
+                trace!(
                     "Found matching event ID {event_id} at index {idx_new} in new items list, corresponding to current item index {idx_curr} at pos offset {pos_offset}"
                 );
                 return Some((*idx_curr, idx_new, pos_offset, event_id.to_owned()));
@@ -509,10 +528,12 @@ fn find_new_item_matching_current_item(
     None
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct FrontendRoomMember {
     name: String,
-    #[serde(flatten)]
+    // This looks shitty but we cannot use serde flatten and ts_rs type together
+    #[ts(type = "{ userPowerLevel: boolean | number }")]
     max_power_level: FrontendUserPowerLevel,
     display_name_ambiguous: bool,
     is_ignored: bool,

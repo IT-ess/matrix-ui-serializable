@@ -7,7 +7,7 @@ pub async fn send_room_creation_request_and_await_response(id: &str) -> anyhow::
     let event_bridge = get_event_bridge()?;
 
     event_bridge.emit(EmitEvent::RoomCreate(MatrixRoomStoreCreateRequest::new(
-        id.to_string(),
+        id.to_owned(),
     )));
 
     let mut receiver = get_room_created_receiver_lock().await?;

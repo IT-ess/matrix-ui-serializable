@@ -103,6 +103,10 @@ pub fn text_preview_of_timeline_item(
                     String::from("[Unable to decrypt message]"),
                     BeforeText::UsernameWithColon,
                 )),
+                MsgLikeKind::Other(kind) => TextPreview::from((
+                    format!("[Unsupported event: {} ]", kind.event_type()),
+                    BeforeText::UsernameWithColon,
+                )),
             }
         }
         TimelineItemContent::MembershipChange(membership_change) => {
@@ -136,7 +140,7 @@ pub fn text_preview_of_timeline_item(
             String::from("[Call Invitation]"),
             BeforeText::UsernameWithColon,
         )),
-        TimelineItemContent::CallNotify => TextPreview::from((
+        TimelineItemContent::RtcNotification => TextPreview::from((
             String::from("[Call Notification]"),
             BeforeText::UsernameWithColon,
         )),
@@ -161,6 +165,7 @@ pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> St
                             .unwrap_or_else(|| poll_state.results().question)
                     )
                 }
+                MsgLikeKind::Other(kind) => kind.event_type().to_string(),
             }
         }
         TimelineItemContent::MembershipChange(membership_change) => {
@@ -205,7 +210,7 @@ pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> St
             )
         }
         TimelineItemContent::CallInvite => String::from("[Call Invitation]"),
-        TimelineItemContent::CallNotify => String::from("[Call Notification]"),
+        TimelineItemContent::RtcNotification => String::from("[Call Notification]"),
     }
 }
 

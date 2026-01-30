@@ -1,0 +1,119 @@
+use matrix_sdk::{
+    Client,
+    authentication::oauth::{
+        OAuthAuthorizationData, UrlOrQuery,
+        registration::{ApplicationType, ClientMetadata, Localized, OAuthGrantType},
+    },
+    ruma::serde::Raw,
+};
+use tokio::sync::mpsc;
+use tracing::{error, info};
+use url::Url;
+
+use crate::{
+    init::singletons::{TEMP_CLIENT_SESSION, get_event_bridge},
+    models::events::EmitEvent,
+};
+
+/// Generate the OAuth 2.0 client metadata.
+fn client_metadata() -> Raw<ClientMetadata> {
+    let client_uri = Localized::new(
+        Url::parse("https://refs.rs").expect("Couldn't parse client URI"),
+        None,
+    );
+
+    let metadata = ClientMetadata {
+        // The following fields should be displayed in the OAuth 2.0 authorization server's
+        // web UI as part of the process to get the user's consent.
+        client_name: Some(Localized::new("Refs".to_owned(), [])),
+        policy_uri: Some(Localized::new(
+            Url::parse("https://refs.rs/privacy").unwrap(),
+            [],
+        )),
+        logo_uri: Some(Localized::new(
+            Url::parse("https://refs.rs/refs_logo.png").expect("couldn't parse refs logo uri"),
+            [],
+        )),
+        // TODO: add terms of service
+        tos_uri: Some(client_uri.clone()),
+        ..ClientMetadata::new(
+            // This is a native application (in contrast to a web application, that runs in a
+            // browser).
+            ApplicationType::Native,
+            // We are going to use the Authorization Code flow.
+            vec![OAuthGrantType::AuthorizationCode {
+                redirect_uris: vec![
+                    Url::parse("https://refs.rs/auth-callback/")
+                        .expect("Couldn't parse custom URI scheme"),
+                ],
+            }],
+            client_uri,
+        )
+    };
+
+    Raw::new(&metadata).expect("Couldn't serialize client metadata")
+}
+
+/// Register the client and log in the user via the OAuth 2.0 Authorization
+/// Code flow.
+pub(crate) async fn register_and_login_oauth(
+    client: &Client,
+    mut oauth_deeplink_receiver: mpsc::Receiver<Url>,
+) -> anyhow::Result<String> {
+    let oauth = client.oauth();
+
+    // We create a loop here so the user can retry if an error happens.
+    loop {
+        let OAuthAuthorizationData { url, .. } = oauth
+            .login(
+                Url::parse("https://refs.rs/auth-callback/")
+                    .expect("Couldn't parse custom URI scheme"),
+                None,
+                Some(client_metadata().into()),
+                None,
+            )
+            .build()
+            .await?;
+
+        // Send auth URL to frontend
+        get_event_bridge()
+            .expect("bridge should be defined at this point")
+            .emit(EmitEvent::OAuthUrl(url.to_string()));
+
+        let query_string = oauth_deeplink_receiver
+            .recv()
+            .await
+            .expect("no url was sent");
+
+        match oauth
+            .finish_login(UrlOrQuery::Query(
+                query_string
+                    .query()
+                    .expect("no query params passed to auth callback")
+                    .to_owned(),
+            ))
+            .await
+        {
+            Ok(()) => {
+                info!("Logged in");
+                break;
+            }
+            Err(err) => {
+                error!("Error: failed to login: {err}");
+                continue;
+            }
+        }
+    }
+
+    let user_session = oauth
+        .full_session()
+        .expect("Should have session after login");
+
+    let full = super::session::FullMatrixSession::new(
+        TEMP_CLIENT_SESSION.wait().clone(),
+        matrix_sdk::AuthSession::OAuth(Box::new(user_session)),
+    );
+    let serialized = serde_json::to_string(&full)?;
+
+    Ok(serialized)
+}

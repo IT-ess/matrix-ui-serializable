@@ -5,4 +5,3 @@ pub(crate) mod notifications;
 pub(crate) mod room_filter;
 pub(crate) mod room_screen;
 pub(crate) mod rooms_list;
-pub(crate) mod tags;

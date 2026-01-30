@@ -1,6 +1,7 @@
 use serde::Serialize;
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",

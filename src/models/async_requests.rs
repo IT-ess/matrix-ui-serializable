@@ -1,16 +1,10 @@
 use matrix_sdk::{
     OwnedServerName, RoomMemberships,
     media::MediaRequestParameters,
-    room::{
-        RoomMember,
-        edit::EditedContent,
-        reply::{EnforceThread, Reply},
-    },
+    room::{RoomMember, edit::EditedContent},
     ruma::{
-        OwnedEventId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
-        events::room::message::{
-            ReplyWithinThread, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
-        },
+        OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
+        events::room::message::{RoomMessageEventContent, RoomMessageEventContentWithoutRelation},
         matrix_uri::MatrixId,
     },
 };
@@ -18,8 +12,16 @@ use matrix_sdk_ui::timeline::TimelineEventItemId;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use tokio::sync::oneshot;
+use ts_rs::TS;
 
-use crate::{events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER};
+use crate::{
+    events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER,
+    models::profile::ProfileModel,
+    room::frontend_events::timeline_item_id::FrontendTimelineEventItemId,
+};
+
+// Re-exports
+pub use matrix_sdk::ruma::api::client::user_directory::search_users::v3::User;
 
 /// Submits a request to the worker thread to be executed asynchronously.
 pub(crate) fn submit_async_request(req: MatrixRequest) {
@@ -53,17 +55,11 @@ pub enum MatrixRequest {
     },
     /// Request to fetch profile information for all members of a room.
     /// This can be *very* slow depending on the number of members in the room.
-    SyncRoomMemberList {
-        room_id: OwnedRoomId,
-    },
+    SyncRoomMemberList { room_id: OwnedRoomId },
     /// Request to join the given room.
-    JoinRoom {
-        room_id: OwnedRoomId,
-    },
+    JoinRoom { room_id: OwnedRoomId },
     /// Request to leave the given room.
-    LeaveRoom {
-        room_id: OwnedRoomId,
-    },
+    LeaveRoom { room_id: OwnedRoomId },
     /// Request to get the actual list of members in a room.
     /// This returns the list of members that can be displayed in the UI.
     GetRoomMembers {
@@ -86,9 +82,7 @@ pub enum MatrixRequest {
         local_only: bool,
     },
     /// Request to fetch the number of unread messages in the given room.
-    GetNumberUnreadMessages {
-        room_id: OwnedRoomId,
-    },
+    GetNumberUnreadMessages { room_id: OwnedRoomId },
     /// Request to ignore/block or unignore/unblock a user.
     IgnoreUser {
         /// Whether to ignore (`true`) or unignore (`false`) the user.
@@ -113,17 +107,17 @@ pub enum MatrixRequest {
     SendMessage {
         room_id: OwnedRoomId,
         message: RoomMessageEventContent,
-        replied_to: Option<Reply>,
+        replied_to_id: Option<OwnedEventId>,
+        /// If set, the timeline used to send this message will be thread-focused
+        /// on the given event id.
+        thread_root_id: Option<OwnedEventId>,
     },
     /// Sends a notice to the given room that the current user is or is not typing.
     ///
     /// This request does not return a response or notify the UI thread, and
     /// furthermore, there is no need to send a follow-up request to stop typing
     /// (though you certainly can do so).
-    SendTypingNotice {
-        room_id: OwnedRoomId,
-        typing: bool,
-    },
+    SendTypingNotice { room_id: OwnedRoomId, typing: bool },
     /// Subscribe to typing notices for the given room.
     ///
     /// This request does not return a response or notify the UI thread.
@@ -145,17 +139,12 @@ pub enum MatrixRequest {
         room_id: OwnedRoomId,
         event_id: OwnedEventId,
     },
-    /// Sends a fully-read receipt for the given event in the given room.
-    FullyReadReceipt {
-        room_id: OwnedRoomId,
-        event_id: OwnedEventId,
-    },
+    /// Sends a read receipt in the given room.
+    MarkRoomAsRead { room_id: OwnedRoomId },
     /// Sends a request to obtain the power levels for this room.
     ///
     /// The response is delivered back to the main UI thread via [`TimelineUpdate::UserPowerLevels`].
-    GetRoomPowerLevels {
-        room_id: OwnedRoomId,
-    },
+    GetRoomPowerLevels { room_id: OwnedRoomId },
     /// Toggles the given reaction to the given event in the given room.
     ToggleReaction {
         room_id: OwnedRoomId,
@@ -176,8 +165,22 @@ pub enum MatrixRequest {
         matrix_id: MatrixId,
         via: Vec<OwnedServerName>,
     },
-    CreateDMRoom {
-        user_id: OwnedUserId,
+    SearchUsers {
+        search_term: String,
+        limit: u64,
+        content_sender: oneshot::Sender<Result<Vec<ProfileModel>, matrix_sdk::Error>>,
+    },
+    /// Create a Matrix room
+    CreateRoom {
+        room_name: String,
+        room_avatar: Option<OwnedMxcUri>,
+        invited_user_ids: Vec<OwnedUserId>,
+        topic: Option<String>,
+    },
+    /// Invite a list of users to a room
+    InviteUsersInRoom {
+        room_id: OwnedRoomId,
+        invited_user_ids: Vec<OwnedUserId>,
     },
 }
 // Deserialize trait is implemented in models/async_requests.rs
@@ -218,9 +221,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 Ok(MatrixRequest::EditMessage {
                     room_id: data.room_id,
                     // We only use remote event_id for now. Transaction (local) ids could be supported in the future
-                    timeline_event_item_id: TimelineEventItemId::EventId(
-                        data.timeline_event_item_id,
-                    ),
+                    timeline_event_item_id: data.timeline_event_item_id.inner(),
                     // We only allow editing messages for now.
                     edited_content: EditedContent::RoomMessage(data.edited_content),
                 })
@@ -296,17 +297,11 @@ impl<'de> Deserialize<'de> for MatrixRequest {
             "sendMessage" => {
                 let data: SendMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                let reply_option = match data.reply_to_event_id {
-                    Some(id) => Some(Reply {
-                        event_id: id,
-                        enforce_thread: EnforceThread::Threaded(ReplyWithinThread::Yes),
-                    }),
-                    None => None,
-                };
                 Ok(MatrixRequest::SendMessage {
                     room_id: data.room_id,
                     message: data.message,
-                    replied_to: reply_option,
+                    replied_to_id: data.reply_to_id,
+                    thread_root_id: data.thread_root_id,
                 })
             }
             "sendTypingNotice" => {
@@ -341,12 +336,11 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     event_id: data.event_id,
                 })
             }
-            "fullyReadReceipt" => {
-                let data: FullyReadReceiptPayload =
+            "markRoomAsRead" => {
+                let data: MarkRoomAsRead =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                Ok(MatrixRequest::FullyReadReceipt {
+                Ok(MatrixRequest::MarkRoomAsRead {
                     room_id: data.room_id,
-                    event_id: data.event_id,
                 })
             }
             "getRoomPowerLevels" => {
@@ -385,11 +379,22 @@ impl<'de> Deserialize<'de> for MatrixRequest {
             //         via: data.via,
             //     })
             // }
-            "createDMRoom" => {
-                let data: CreateDMRoomPayload =
+            "createRoom" => {
+                let data: CreateRoomPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                Ok(MatrixRequest::CreateDMRoom {
-                    user_id: data.user_id,
+                Ok(MatrixRequest::CreateRoom {
+                    room_name: data.room_name,
+                    room_avatar: data.room_avatar,
+                    invited_user_ids: data.invited_user_ids,
+                    topic: data.topic,
+                })
+            }
+            "inviteUsersInRoom" => {
+                let data: InviteUsersInRoomPayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::InviteUsersInRoom {
+                    room_id: data.room_id,
+                    invited_user_ids: data.invited_user_ids,
                 })
             }
             _ => Err(serde::de::Error::unknown_variant(
@@ -411,12 +416,17 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "subscribeToTypingNotices",
                     "subscribeToOwnUserReadReceiptsChanged",
                     "readReceipt",
-                    "fullyReadReceipt",
+                    "markRoomAsRead",
                     "getRoomPowerLevels",
                     "toggleReaction",
                     "redactMessage",
                     // "getMatrixRoomLinkPillInfo",
                     "createDMRoom",
+                    "sendRef",
+                    "updatePersonalRef",
+                    "createRefsDMRoom",
+                    "createRoom",
+                    "inviteUsersInRoom",
                 ],
             )),
         }
@@ -436,7 +446,7 @@ struct PaginateRoomTimelinePayload {
 #[serde(rename_all = "camelCase")]
 struct EditMessagePayload {
     room_id: OwnedRoomId,
-    timeline_event_item_id: OwnedEventId,
+    timeline_event_item_id: FrontendTimelineEventItemId,
     edited_content: RoomMessageEventContentWithoutRelation,
 }
 
@@ -495,12 +505,16 @@ struct GetNumberUnreadMessagesPayload {
 //     room_id: OwnedRoomId,
 // }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 struct SendMessagePayload {
     room_id: OwnedRoomId,
     message: RoomMessageEventContent,
-    reply_to_event_id: Option<OwnedEventId>,
+    reply_to_id: Option<OwnedEventId>,
+    /// If set, the timeline used to send this message will be thread-focused
+    /// on the given event id.
+    thread_root_id: Option<OwnedEventId>,
 }
 
 #[derive(Deserialize)]
@@ -533,9 +547,8 @@ struct ReadReceiptPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FullyReadReceiptPayload {
+struct MarkRoomAsRead {
     room_id: OwnedRoomId,
-    event_id: OwnedEventId,
 }
 
 #[derive(Deserialize)]
@@ -552,8 +565,9 @@ struct ToggleReactionPayload {
     reaction: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 struct RedactMessagePayload {
     room_id: OwnedRoomId,
     timeline_event_id: OwnedEventId,
@@ -569,6 +583,16 @@ struct RedactMessagePayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateDMRoomPayload {
-    user_id: OwnedUserId,
+struct CreateRoomPayload {
+    room_name: String,
+    room_avatar: Option<OwnedMxcUri>,
+    invited_user_ids: Vec<OwnedUserId>,
+    topic: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InviteUsersInRoomPayload {
+    room_id: OwnedRoomId,
+    invited_user_ids: Vec<OwnedUserId>,
 }

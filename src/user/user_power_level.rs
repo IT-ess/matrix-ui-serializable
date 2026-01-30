@@ -1,9 +1,15 @@
 use std::ops::{Deref, DerefMut};
 
 use bitflags::bitflags;
-use matrix_sdk::ruma::{
-    Int, UserId,
-    events::room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
+use matrix_sdk::{
+    Room,
+    ruma::{
+        UserId,
+        events::{
+            MessageLikeEventType, StateEventType,
+            room::power_levels::{RoomPowerLevels, UserPowerLevel},
+        },
+    },
 };
 use serde::{Serialize, Serializer};
 
@@ -54,7 +60,7 @@ bitflags! {
         // const PolicyRuleServer = 1 << 36;
         // const PolicyRuleUser = 1 << 37;
         // const RoomAliases = 1 << 38;
-        // const RoomAvatar = 1 << 39;
+        const RoomAvatar = 1 << 39;
         // const RoomCanonicalAlias = 1 << 40;
         // const RoomCreate = 1 << 41;
         // const RoomEncryption = 1 << 42;
@@ -62,13 +68,13 @@ bitflags! {
         // const RoomHistoryVisibility = 1 << 44;
         // const RoomJoinRules = 1 << 45;
         // const RoomMember = 1 << 46;
-        // const RoomName = 1 << 47;
+        const RoomName = 1 << 47;
         const RoomPinnedEvents = 1 << 48;
         // const RoomPowerLevels = 1 << 49;
         // const RoomServerAcl = 1 << 50;
         // const RoomThirdPartyInvite = 1 << 51;
         // const RoomTombstone = 1 << 52;
-        // const RoomTopic = 1 << 53;
+        const RoomTopic = 1 << 53;
         // const SpaceChild = 1 << 54;
         // const SpaceParent = 1 << 55;
         // const BeaconInfo = 1 << 56;
@@ -77,12 +83,14 @@ bitflags! {
     }
 }
 impl UserPowerLevels {
-    pub fn from(power_levels: &RoomPowerLevelsEventContent, user_id: &UserId) -> Self {
+    pub async fn from_room(room: &Room, user_id: &UserId) -> Option<Self> {
+        let room_power_levels = room.power_levels().await.ok()?;
+        Some(UserPowerLevels::from(&room_power_levels, user_id))
+    }
+
+    pub fn from(power_levels: &RoomPowerLevels, user_id: &UserId) -> Self {
         let mut retval = UserPowerLevels::empty();
-        let user_power = power_levels
-            .users
-            .get(user_id)
-            .map_or(Int::default(), |f| f.to_owned());
+        let user_power = power_levels.for_user(user_id);
         retval.set(UserPowerLevels::Ban, user_power >= power_levels.ban);
         retval.set(UserPowerLevels::Invite, user_power >= power_levels.invite);
         retval.set(UserPowerLevels::Kick, user_power >= power_levels.kick);
@@ -93,59 +101,43 @@ impl UserPowerLevels {
         );
         retval.set(
             UserPowerLevels::Location,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::Location)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::Location),
         );
         retval.set(
             UserPowerLevels::Message,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::Message)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::Message),
         );
         retval.set(
             UserPowerLevels::Reaction,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::Reaction)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::Reaction),
         );
         retval.set(
             UserPowerLevels::RoomMessage,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomMessage)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::RoomMessage),
         );
         retval.set(
             UserPowerLevels::RoomRedaction,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomRedaction)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::RoomRedaction),
         );
         retval.set(
             UserPowerLevels::Sticker,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::Sticker)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_message(MessageLikeEventType::Sticker),
+        );
+        retval.set(
+            UserPowerLevels::RoomAvatar,
+            user_power >= power_levels.for_state(StateEventType::RoomAvatar),
+        );
+        retval.set(
+            UserPowerLevels::RoomName,
+            user_power >= power_levels.for_state(StateEventType::RoomName),
         );
         retval.set(
             UserPowerLevels::RoomPinnedEvents,
-            user_power
-                >= power_levels
-                    .events
-                    .get(&matrix_sdk::ruma::events::TimelineEventType::RoomPinnedEvents)
-                    .map_or(Int::default(), |f| f.to_owned()),
+            user_power >= power_levels.for_state(StateEventType::RoomPinnedEvents),
+        );
+        retval.set(
+            UserPowerLevels::RoomTopic,
+            user_power >= power_levels.for_state(StateEventType::RoomTopic),
         );
         retval
     }
@@ -246,8 +238,17 @@ impl Serialize for UserPowerLevels {
         if self.contains(UserPowerLevels::Sticker) {
             seq.serialize_element("sticker")?;
         }
+        if self.contains(UserPowerLevels::RoomAvatar) {
+            seq.serialize_element("roomAvatar")?;
+        }
+        if self.contains(UserPowerLevels::RoomName) {
+            seq.serialize_element("roomName")?;
+        }
         if self.contains(UserPowerLevels::RoomPinnedEvents) {
             seq.serialize_element("roomPinnedEvents")?;
+        }
+        if self.contains(UserPowerLevels::RoomTopic) {
+            seq.serialize_element("roomTopic")?;
         }
 
         seq.end()

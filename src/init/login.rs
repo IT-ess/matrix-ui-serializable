@@ -1,117 +1,104 @@
-use matrix_sdk::{Client, sliding_sync::VersionBuilder};
-
-use std::path::PathBuf;
+use matrix_sdk::{
+    Client, ThreadingSupport, config::RequestConfig, encryption::EncryptionSettings,
+    sliding_sync::VersionBuilder,
+};
 
 use rand::{Rng, distr::Alphanumeric, rng};
-use serde::{Deserialize, Serialize};
 
-use crate::init::singletons::CLIENT;
+use crate::{
+    events::handlers::add_event_handlers,
+    init::singletons::{APP_DATA_DIR, TEMP_CLIENT_SESSION},
+};
 
 use super::session::ClientSession;
 
-/// The user's account credentials to create a new Matrix session
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct MatrixClientConfig {
+pub(crate) async fn login_and_persist_matrix_session(
+    client: &Client,
     username: String,
     password: String,
-    homeserver_url: String,
-    client_name: String,
-}
-
-impl MatrixClientConfig {
-    pub fn new(
-        username: String,
-        password: String,
-        homeserver_url: String,
-        client_name: String,
-    ) -> Self {
-        MatrixClientConfig {
-            username,
-            password,
-            homeserver_url,
-            client_name,
-        }
-    }
-
-    pub fn username(&self) -> &str {
-        &self.username
-    }
-}
-
-/// Details of a login request that get submitted when calling login command
-pub enum LoginRequest {
-    LoginByPassword(MatrixClientConfig),
-}
-
-pub async fn get_client_from_new_session(
-    login_request: LoginRequest,
-    app_data_dir: PathBuf,
-) -> anyhow::Result<(Client, String)> {
-    let matrix_config = match login_request {
-        LoginRequest::LoginByPassword(config) => config,
-        // TODO: add new login ways
-    };
-
-    let client_initial_state = login_and_persist_session(&matrix_config, app_data_dir).await?;
-
-    CLIENT
-        .set(client_initial_state.0.clone())
-        .expect("BUG: CLIENT already set!");
-
-    Ok(client_initial_state)
-}
-
-async fn login_and_persist_session(
-    config: &MatrixClientConfig,
-    app_data_dir: PathBuf,
-) -> anyhow::Result<(Client, String)> {
-    let (client, client_session) = build_client(config, app_data_dir).await?;
-
+    device_name: String,
+) -> anyhow::Result<String> {
     let matrix_auth = client.matrix_auth();
 
     matrix_auth
-        .login_username(&config.username, &config.password)
-        .initial_device_display_name(&config.client_name)
+        .login_username(username, &password)
+        .initial_device_display_name(&device_name)
         .await?;
 
     let user_session = matrix_auth
         .session()
         .expect("Should have session after login");
 
-    let full = super::session::FullMatrixSession::new(client_session, user_session);
+    let full = super::session::FullMatrixSession::new(
+        TEMP_CLIENT_SESSION.wait().clone(),
+        matrix_sdk::AuthSession::Matrix(user_session),
+    );
     let serialized = serde_json::to_string(&full)?;
 
-    Ok((client, serialized))
+    Ok(serialized)
 }
 
-async fn build_client(
-    config: &MatrixClientConfig,
-    app_data_dir: PathBuf,
+pub async fn build_client(
+    homeserver_opt: Option<String>,
+    client_session: Option<ClientSession>,
 ) -> anyhow::Result<(Client, ClientSession)> {
-    let db_subfolder: String = rng()
-        .sample_iter(Alphanumeric)
-        .take(7)
-        .map(char::from)
-        .collect();
-    let db_path = app_data_dir.join("matrix-db").join(db_subfolder);
+    let (homeserver, db_path, passphrase, db_identifier) = match client_session {
+        Some(s) => {
+            let db_path = APP_DATA_DIR
+                .wait()
+                .clone()
+                .join("matrix-db")
+                .join(&s.db_identifier);
+            (s.homeserver, db_path, s.passphrase, s.db_identifier)
+        }
+        None => {
+            if let Some(homeserver) = homeserver_opt {
+                let db_identifier: String = rng()
+                    .sample_iter(Alphanumeric)
+                    .take(7)
+                    .map(char::from)
+                    .collect();
+                let db_path = APP_DATA_DIR
+                    .wait()
+                    .clone()
+                    .join("matrix-db")
+                    .join(&db_identifier);
 
-    std::fs::create_dir_all(&db_path)?;
+                std::fs::create_dir_all(&db_path)?;
 
-    let passphrase: String = rng()
-        .sample_iter(Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect();
+                let passphrase: String = rng()
+                    .sample_iter(Alphanumeric)
+                    .take(32)
+                    .map(char::from)
+                    .collect();
+                (homeserver, db_path, passphrase, db_identifier)
+            } else {
+                panic!("Cannot recover session from storage or create it without homeserver")
+            }
+        }
+    };
 
     let client = Client::builder()
-        .homeserver_url(&config.homeserver_url)
+        .server_name_or_homeserver_url(homeserver.clone())
+        .with_threading_support(ThreadingSupport::Enabled {
+            with_subscriptions: false,
+        })
         .sqlite_store(&db_path, Some(&passphrase))
-        .sliding_sync_version_builder(VersionBuilder::DiscoverNative) // Comment this if your homeserver doesn't support simplified sliding sync.
+        .sliding_sync_version_builder(VersionBuilder::DiscoverNative)
+        .with_encryption_settings(EncryptionSettings {
+            auto_enable_cross_signing: true,
+            backup_download_strategy: matrix_sdk::encryption::BackupDownloadStrategy::OneShot,
+            auto_enable_backups: true,
+        })
+        .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens()
+        .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)))
         .build()
         .await?;
 
-    let client_session = ClientSession::new(config.homeserver_url.clone(), db_path, passphrase);
+    add_event_handlers(&client)?;
+
+    let client_session = ClientSession::new(homeserver, db_identifier, passphrase);
 
     Ok((client, client_session))
 }

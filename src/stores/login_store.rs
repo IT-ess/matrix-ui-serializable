@@ -3,24 +3,26 @@ use std::ops::{Deref, DerefMut};
 use matrix_sdk::encryption::VerificationState;
 use matrix_sdk_ui::sync_service;
 use serde::{Serialize, Serializer, ser::SerializeStruct};
+use ts_rs::TS;
 
 /// Wether the user has logged in, or is in another state.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LoginState {
     Initiating,
     Restored,
-    AwaitingForLogin,
+    AwaitingForHomeserver,
     LoggedIn,
 }
 
 impl LoginState {
     pub fn to_camel_case(&self) -> String {
         match self {
-            LoginState::Initiating => "initiating".to_string(),
-            LoginState::Restored => "restored".to_string(),
-            LoginState::AwaitingForLogin => "awaitingForLogin".to_string(),
-            LoginState::LoggedIn => "loggedIn".to_string(),
+            LoginState::Initiating => "initiating".to_owned(),
+            LoginState::Restored => "restored".to_owned(),
+            LoginState::AwaitingForHomeserver => "awaitingForHomeserver".to_owned(),
+            LoginState::LoggedIn => "loggedIn".to_owned(),
         }
     }
 }
@@ -34,6 +36,12 @@ impl Deref for FrontendVerificationState {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<VerificationState> for FrontendVerificationState {
+    fn from(state: VerificationState) -> Self {
+        Self(state)
     }
 }
 
@@ -94,7 +102,7 @@ impl FrontendSyncServiceState {
 
     pub fn to_camel_case(&self) -> &str {
         match self {
-            FrontendSyncServiceState(sync_service::State::Error) => "error",
+            FrontendSyncServiceState(sync_service::State::Error(_)) => "error",
             FrontendSyncServiceState(sync_service::State::Idle) => "idle",
             FrontendSyncServiceState(sync_service::State::Offline) => "offline",
             FrontendSyncServiceState(sync_service::State::Running) => "running",

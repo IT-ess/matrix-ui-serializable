@@ -1,22 +1,30 @@
 use std::{path::PathBuf, sync::Arc, thread, time::Duration};
 
+use futures::StreamExt;
 use serde::{Serialize, ser::Serializer};
-use tokio::{runtime::Handle, sync::broadcast};
+use tokio::{
+    runtime::Handle,
+    sync::{broadcast, mpsc::unbounded_channel},
+};
+use tracing::{error, info};
+use url::Url;
 
 use crate::{
     init::{
-        session::try_restore_session_to_state,
+        FrontendAuthTypeResponse, check_homeserver_auth_type,
+        session::{setup_token_background_save, try_restore_session_to_state},
         singletons::{
-            APP_DATA_DIR, CLIENT, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER,
-            VERIFICATION_RESPONSE_RECEIVER,
+            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER,
+            VERIFICATION_RESPONSE_RECEIVER, get_cloned_client,
         },
         workers::{async_main_loop, async_worker},
     },
     models::{
         event_bridge::EventBridge,
         events::{
-            EmitEvent, MatrixRoomStoreCreatedRequest, MatrixUpdateCurrentActiveRoom,
-            MatrixVerificationResponse, ToastNotificationRequest, ToastNotificationVariant,
+            EmitEvent, MatrixLoginPayload, MatrixRoomStoreCreatedRequest,
+            MatrixUpdateCurrentActiveRoom, MatrixVerificationResponse, ToastNotificationRequest,
+            ToastNotificationVariant,
         },
         state_updater::StateUpdater,
     },
@@ -26,12 +34,12 @@ use crate::{
     },
 };
 
+pub(crate) mod account;
 pub mod commands;
 pub(crate) mod events;
 pub(crate) mod init;
 pub mod models;
 pub(crate) mod room;
-pub(crate) mod seshat;
 pub(crate) mod stores;
 pub(crate) mod user;
 pub(crate) mod utils;
@@ -60,9 +68,13 @@ impl Serialize for Error {
 
 /// Required `mpsc:Receiver`s to listen to incoming events
 pub struct EventReceivers {
+    // Event based
     room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
     verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
     room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
+    // Command based
+    matrix_login_receiver: mpsc::Receiver<MatrixLoginPayload>,
+    oauth_deeplink_receiver: mpsc::Receiver<Url>,
 }
 
 impl EventReceivers {
@@ -70,11 +82,15 @@ impl EventReceivers {
         room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
         verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
         room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
+        matrix_login_receiver: mpsc::Receiver<MatrixLoginPayload>,
+        oauth_deeplink_receiver: mpsc::Receiver<Url>,
     ) -> Self {
         Self {
             room_created_receiver,
             verification_response_receiver,
             room_update_receiver,
+            matrix_login_receiver,
+            oauth_deeplink_receiver,
         }
     }
 }
@@ -88,23 +104,19 @@ pub struct LibConfig {
     event_receivers: EventReceivers,
     /// The session option stored (or not) by the adapter. It is serialized.
     session_option: Option<String>,
-    /// The required configuration for mobile push notifications to work
-    mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
-    /// A PathBuf to the temporary dir of the app
+    /// A PathBuf to the application data directory
     app_data_dir: PathBuf,
 }
 
 impl LibConfig {
     pub fn new(
         updaters: Box<dyn StateUpdater>,
-        mobile_push_notifications_config: Option<MobilePushNotificationConfig>,
         event_receivers: EventReceivers,
         session_option: Option<String>,
         app_data_dir: PathBuf,
     ) -> Self {
         Self {
             updaters,
-            mobile_push_notifications_config,
             event_receivers,
             session_option,
             app_data_dir,
@@ -114,7 +126,11 @@ impl LibConfig {
 
 /// Function to be called once your app is starting to init this lib.
 /// This will start the workers and return a `Receiver` to forward outgoing events.
-pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
+pub async fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
+    APP_DATA_DIR
+        .set(config.app_data_dir)
+        .expect("Couldn't set app data dir");
+
     // Lib -> adapter events
     let (event_bridge, broadcast_receiver) = EventBridge::new();
     EVENT_BRIDGE
@@ -135,94 +151,196 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .expect("Couldn't set the verification response receiver");
 
     // Create a channel to be used between UI thread(s) and the async worker thread.
-    crate::init::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster"); // TODO: adapt capacity if needed
+    init::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster"); // TODO: adapt capacity if needed
 
-    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<MatrixRequest>();
+    let (sender, receiver) = unbounded_channel::<MatrixRequest>();
     REQUEST_SENDER
         .set(sender)
         .expect("BUG: REQUEST_SENDER already set!");
 
-    APP_DATA_DIR
-        .set(config.app_data_dir)
-        .expect("Couldn't set temporary dir");
-
     // Wait for frontend to be ready before proceeding with the init.
     LOGIN_STORE_READY.wait();
-    println!("FRONTEND IS READY");
+    info!("FRONTEND IS READY");
+
     let _monitor = Handle::current().spawn(async move {
-        // Init seshat first
-        seshat::commands::init_event_index("password".to_string()) // TODO: add to config. This password is used for encryption only, that is deactivated for now anyway.
-            .await
-            .expect("Couldn't init seshat index");
+        let updaters_arc = Arc::new(config.updaters);
+        let inner_updaters = updaters_arc.clone();
 
-        println!(
-            "IS SESHAT EMPTY: {}",
-            seshat::commands::is_event_index_empty().await.unwrap()
-        );
-        let db_stats = seshat::commands::get_stats().await.unwrap();
-        println!("SESHAT EVENT COUNT: {}", db_stats.event_count);
-        println!("SESHAT ROOM COUNT: {}", db_stats.room_count);
+        // Setup the token refresher thread
+        setup_token_background_save(inner_updaters.clone());
 
-        let client = try_restore_session_to_state(
-            config.session_option,
-            config.mobile_push_notifications_config,
-        )
-        .await
-        .expect("Couldn't try to restore session");
-
-        let client = match client {
-            Some(new_login) => {
-                let _ = &config
-                    .updaters
-                    .update_login_state(
-                        LoginState::Restored,
-                        new_login
-                            .user_id()
-                            .map_or(None, |val| Some(val.to_string())),
-                    )
-                    .expect("Couldn't update login state");
-                new_login
-            }
-            None => {
-                println!("Waiting for login request...");
-                thread::sleep(Duration::from_secs(3)); // Block the thread for 3 secs to let the frontend init itself.
-                let _ = &config
-                    .updaters
-                    .update_login_state(LoginState::AwaitingForLogin, None)
-                    .expect("Couldn't update login state");
-                // We await frontend to call the login command and set the client
-                // loop until client is set
-                CLIENT.wait();
-                let client = CLIENT.get().unwrap().clone();
-                let _ = &config
-                    .updaters
-                    .update_login_state(
-                        LoginState::LoggedIn,
-                        client
-                            .user_id()
-                            .clone()
-                            .map_or(None, |val| Some(val.to_string())),
-                    )
-                    .expect("Couldn't update login state");
-                client
+        let client_opt = match try_restore_session_to_state(config.session_option).await {
+            Ok(opt) => opt,
+            Err(e) => {
+                enqueue_toast_notification(ToastNotificationRequest::new(
+                    format!("Failed to restore session, falling back on login. Error: {e}"),
+                    None,
+                    ToastNotificationVariant::Error,
+                ));
+                None
             }
         };
 
+        let (client, _has_been_restored) = match client_opt {
+            Some(restored) => {
+                if let Err(e) = &inner_updaters.update_login_state(
+                    LoginState::Restored,
+                    restored.user_id().map(|v| v.to_string()),
+                ) {
+                    enqueue_toast_notification(ToastNotificationRequest::new(
+                        format!("Cannot update login state. Error: {e}"),
+                        None,
+                        ToastNotificationVariant::Error,
+                    ))
+                }
+                (restored, true)
+            }
+            None => {
+                // Block the thread for 1 sec to let the frontend init itself.
+                // Note: that's a shitty way to handle a race condition, but otherwise the
+                // Svelte Login store doesn't receive the updates.
+                thread::sleep(Duration::from_secs(1));
+                if let Err(e) =
+                    &inner_updaters.update_login_state(LoginState::AwaitingForHomeserver, None)
+                {
+                    enqueue_toast_notification(ToastNotificationRequest::new(
+                        format!("Cannot update login state. Error: {e}"),
+                        None,
+                        ToastNotificationVariant::Error,
+                    ))
+                }
+                info!("Waiting for homeserver selection...");
+
+                let client = if let Ok(auth_type) = check_homeserver_auth_type().await {
+                    let client =
+                        get_cloned_client().expect("client should be defined at this point");
+                    let serialized_session = match auth_type {
+                        FrontendAuthTypeResponse::Oauth => init::oauth::register_and_login_oauth(
+                            &client,
+                            config.event_receivers.oauth_deeplink_receiver,
+                        )
+                        .await
+                        .expect("Failed to login with OAuth"),
+                        FrontendAuthTypeResponse::Matrix => {
+                            // wait for frontend payload
+                            let login_payload = config
+                                .event_receivers
+                                .matrix_login_receiver
+                                .recv()
+                                .await
+                                .expect("no login sender to listen to");
+                            init::login::login_and_persist_matrix_session(
+                                &client,
+                                login_payload.username.clone(),
+                                login_payload.password.clone(),
+                                login_payload.client_name.clone(),
+                            )
+                            .await
+                            .expect("Failed to login with Matrix Auth")
+                        }
+                        FrontendAuthTypeResponse::WrongUrl => {
+                            enqueue_toast_notification(ToastNotificationRequest::new(
+                                "The homeserver URL is incorrect".to_owned(),
+                                Some("Please restart the app and try another one.".to_owned()),
+                                ToastNotificationVariant::Error,
+                            ));
+                            "".to_owned()
+                        }
+                    };
+
+                    if let Err(e) = &inner_updaters
+                        .persist_login_session(serialized_session)
+                        .await
+                    {
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Failed to persist login session. Error: {e}"),
+                            None,
+                            ToastNotificationVariant::Error,
+                        ));
+                    }
+
+                    client
+                } else {
+                    panic!("Unknown homeserver auth type")
+                };
+
+                // Update frontend login state
+                if let Err(e) = &inner_updaters.update_login_state(
+                    LoginState::LoggedIn,
+                    client.user_id().map(|v| v.to_string()),
+                ) {
+                    enqueue_toast_notification(ToastNotificationRequest::new(
+                        format!("Cannot update login state. Error: {e}"),
+                        None,
+                        ToastNotificationVariant::Error,
+                    ))
+                }
+                (client, false)
+            }
+        };
+
+        CURRENT_USER_ID
+            .set(client.user_id().unwrap().to_owned())
+            .expect("Couldn't set CURRENT_USER_ID singleton");
+
+        let user_avatar = client.account().get_avatar_url().await.map_or(None, |a| a);
+
+        let user_display_name = client
+            .account()
+            .get_display_name()
+            .await
+            .map_or(None, |n| n);
+
+        let device_name = client
+            .encryption()
+            .get_own_device()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|d| d.display_name().map(|s| s.to_owned()));
+
+        if let Err(e) = inner_updaters.update_current_user_info(
+            Some(client.user_id().unwrap().to_owned()),
+            user_avatar,
+            user_display_name,
+            device_name,
+        ) {
+            enqueue_toast_notification(ToastNotificationRequest::new(
+                format!("Cannot update current user info. Error: {e}"),
+                None,
+                ToastNotificationVariant::Error,
+            ))
+        }
+
         let mut verification_subscriber = client.encryption().verification_state();
 
-        let updaters_arc = Arc::new(config.updaters);
-        let inner_updaters = updaters_arc.clone();
+        let verification_state_updaters = inner_updaters.clone();
         tokio::task::spawn(async move {
             while let Some(state) = verification_subscriber.next().await {
-                inner_updaters
-                    .clone()
+                if let Err(e) = verification_state_updaters
                     .update_verification_state(FrontendVerificationState::new(state))
-                    .expect("Couldn't update verification state in Svelte Store");
+                {
+                    enqueue_toast_notification(ToastNotificationRequest::new(
+                        format!("Cannot update verification store. Error: {e}"),
+                        None,
+                        ToastNotificationVariant::Error,
+                    ))
+                }
+            }
+        });
+
+        let mut state_stream = client.encryption().recovery().state_stream();
+        let recovery_state_updaters = inner_updaters.clone();
+        tokio::task::spawn(async move {
+            while let Some(update) = state_stream.next().await {
+                recovery_state_updaters
+                    .update_recovery_state(update)
+                    .expect("couldn't update frontend recovery state")
             }
         });
 
         let mut ui_event_receiver =
-            crate::init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
+            init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
 
         // Spawn the actual async worker thread.
         let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));
@@ -240,10 +358,10 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                 result = &mut main_loop_join_handle => {
                     match result {
                         Ok(Ok(())) => {
-                            eprintln!("BUG: main async loop task ended unexpectedly!");
+                            error!("BUG: main async loop task ended unexpectedly!");
                         }
                         Ok(Err(e)) => {
-                            eprintln!("Error: main async loop task ended:\n\t{e:?}");
+                            error!("Error: main async loop task ended:\n\t{e:?}");
                             enqueue_rooms_list_update(RoomsListUpdate::Status {
                                 status: RoomsCollectionStatus::Error(e.to_string()),
                             });
@@ -254,7 +372,7 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                             ));
                         },
                         Err(e) => {
-                            eprintln!("BUG: failed to join main async loop task: {e:?}");
+                            error!("BUG: failed to join main async loop task: {e:?}");
                         }
                     }
                     break;
@@ -262,10 +380,10 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                 result = &mut worker_join_handle => {
                     match result {
                         Ok(Ok(())) => {
-                            eprintln!("BUG: async worker task ended unexpectedly!");
+                            error!("BUG: async worker task ended unexpectedly!");
                         }
                         Ok(Err(e)) => {
-                            eprintln!("Error: async worker task ended:\n\t{e:?}");
+                            error!("Error: async worker task ended:\n\t{e:?}");
                             enqueue_rooms_list_update(RoomsListUpdate::Status {
                                 status: RoomsCollectionStatus::Error(e.to_string()),
                             });
@@ -276,14 +394,14 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                             ));
                         },
                         Err(e) => {
-                            eprintln!("BUG: failed to join async worker task: {e:?}");
+                            error!("BUG: failed to join async worker task: {e:?}");
                         }
                     }
                     break;
                 }
                 _ = ui_event_receiver.recv() => {
                     #[cfg(debug_assertions)]
-                    println!("Received UI update event");
+                    tracing::trace!("Received UI update event");
                 }
             }
         }
@@ -295,17 +413,18 @@ pub fn init(config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
 // Re-exports
 
-pub use init::login::MatrixClientConfig;
+pub use init::session::FullMatrixSession;
 pub use init::singletons::LOGIN_STORE_READY;
 pub use models::async_requests::*;
-pub use room::notifications::MobilePushNotificationConfig;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};
 pub use user::user_profile::UserProfileMap;
 
 // The adapter needs some types in those modules
+pub use matrix_sdk::AuthSession;
+pub use matrix_sdk::encryption::recovery::RecoveryState;
 pub use matrix_sdk::media::MediaRequestParameters;
-pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId};
+pub use matrix_sdk::ruma::{OwnedDeviceId, OwnedMxcUri, OwnedRoomId, OwnedUserId};
 pub use tokio::sync::mpsc;
 pub use tokio::sync::oneshot;

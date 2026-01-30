@@ -1,3 +1,5 @@
+use std::sync::mpsc::Sender;
+
 use anyhow::anyhow;
 use futures_util::stream::StreamExt;
 use matrix_sdk::{
@@ -8,11 +10,12 @@ use matrix_sdk::{
     },
     ruma::{DeviceId, UserId, events::key::verification::VerificationMethod},
 };
-use tokio::runtime::Handle;
+use tokio::{runtime::Handle, sync::oneshot};
+use tracing::{debug, info};
 
 use crate::{
-    init::singletons::{get_client, get_event_bridge, get_verification_response_receiver_lock},
-    models::events::{EmitEvent, MatrixVerificationEmojis},
+    init::singletons::{CLIENT, get_event_bridge, get_verification_response_receiver_lock},
+    models::events::{EmitEvent, MatrixVerificationEmojis, VerifyDeviceEvent},
 };
 
 async fn wait_for_confirmation(sas: SasVerification, emoji: [Emoji; 7]) -> anyhow::Result<()> {
@@ -34,7 +37,7 @@ async fn wait_for_confirmation(sas: SasVerification, emoji: [Emoji; 7]) -> anyho
 }
 
 async fn print_devices(user_id: &UserId, client: &Client) {
-    println!("Devices of user {user_id}");
+    info!("Devices of user {user_id}");
 
     for device in client
         .encryption()
@@ -51,7 +54,7 @@ async fn print_devices(user_id: &UserId, client: &Client) {
             continue;
         }
 
-        println!(
+        info!(
             "   {:<10} {:<30} {:<}",
             device.device_id(),
             device.display_name().unwrap_or("-"),
@@ -61,7 +64,7 @@ async fn print_devices(user_id: &UserId, client: &Client) {
 }
 
 async fn sas_verification_handler(client: Client, sas: SasVerification) {
-    println!(
+    info!(
         "Starting verification with {} {}",
         &sas.other_device().user_id(),
         &sas.other_device().device_id()
@@ -87,7 +90,7 @@ async fn sas_verification_handler(client: Client, sas: SasVerification) {
             SasState::Done { .. } => {
                 let device = sas.other_device();
 
-                println!(
+                info!(
                     "Successfully verified device {} {} {:?}",
                     device.user_id(),
                     device.device_id(),
@@ -99,7 +102,7 @@ async fn sas_verification_handler(client: Client, sas: SasVerification) {
                 break;
             }
             SasState::Cancelled(cancel_info) => {
-                println!(
+                info!(
                     "The verification has been cancelled, reason: {}",
                     cancel_info.reason()
                 );
@@ -115,7 +118,7 @@ async fn sas_verification_handler(client: Client, sas: SasVerification) {
 }
 
 pub async fn request_verification_handler(client: Client, request: VerificationRequest) {
-    println!(
+    info!(
         "Accepting verification request from {}",
         request.other_user_id(),
     );
@@ -143,8 +146,15 @@ pub async fn request_verification_handler(client: Client, request: VerificationR
     }
 }
 
-pub async fn verify_device(user_id: &UserId, device_id: &DeviceId) -> anyhow::Result<()> {
-    let client = get_client().expect("Client should be defined at this state");
+pub async fn verify_device(
+    user_id: &UserId,
+    device_id: &DeviceId,
+    mut cancel_rx: oneshot::Receiver<()>,
+    status_tx: Sender<VerifyDeviceEvent>,
+) -> anyhow::Result<()> {
+    let client = CLIENT
+        .get()
+        .expect("Client should be defined at this state");
     let device_option = client
         .encryption()
         .get_device(user_id, device_id)
@@ -163,28 +173,76 @@ pub async fn verify_device(user_id: &UserId, device_id: &DeviceId) -> anyhow::Re
 
     let mut stream = request.changes();
 
-    while let Some(state) = stream.next().await {
-        match state {
-            VerificationRequestState::Created { .. }
-            | VerificationRequestState::Requested { .. }
-            | VerificationRequestState::Transitioned { .. } => (),
-            VerificationRequestState::Ready {
-                our_methods: _,
-                other_device_data: _,
-                their_methods,
-            } => {
-                if their_methods.contains(&VerificationMethod::SasV1) {
-                    if let Some(sas) = request.start_sas().await? {
-                        Handle::current().spawn(sas_verification_handler(client, sas));
-                        break;
-                    };
-                } else {
-                    request.cancel().await?
+    // The main loop that uses tokio::select!
+    let handle = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                // 1. Check for the next state change in the verification stream
+                state_option = stream.next() => {
+                    let Some(state) = state_option else {
+                            // Stream has ended unexpectedly (e.g., closed)
+                            return Err(anyhow!("Verification stream closed unexpectedly"));
+                        };
+
+                    match state {
+                        VerificationRequestState::Created { .. } | VerificationRequestState::Requested { .. } | VerificationRequestState::Transitioned { .. } => {
+                            status_tx
+                                .send(VerifyDeviceEvent::Requested)
+                                .expect("couldn't send event");
+                            debug!("Verification began !");
+                        }
+                        VerificationRequestState::Ready {
+                            our_methods: _,
+                            other_device_data: _,
+                            their_methods,
+                        } => {
+                            debug!("Verification ready !");
+                            if their_methods.contains(&VerificationMethod::SasV1) {
+                                if let Some(sas) = request.start_sas().await? {
+                                    Handle::current().spawn(sas_verification_handler(client.clone(), sas));
+                                }
+                            } else {
+                                request.cancel().await?;
+                                status_tx
+                                    .send(VerifyDeviceEvent::Cancelled {
+                                        reason: "SAS verification isn't available".to_owned(),
+                                    }).expect("couldn't send event");
+                                break;
+                            }
+                        }
+                        VerificationRequestState::Done => {
+                            debug!("Verification done !");
+                            status_tx
+                                .send(VerifyDeviceEvent::Done)
+                                .expect("couldn't send event");
+                            break;
+                        }
+                        VerificationRequestState::Cancelled(reason) => {
+                            // Notify the frontend to display cancellation reason
+                            debug!("Verification cancelled !");
+                            status_tx
+                                .send(VerifyDeviceEvent::Cancelled {
+                                    reason: reason.reason().to_owned(),
+                                }).expect("couldn't send event");
+                            break;
+                        }
+                    }
+                }
+                // 2. Check for cancellation signal
+                _ = &mut cancel_rx => {
+                    // Cancellation signal received
+                    request.cancel().await?; // Cancel the underlying request
+                    status_tx
+                        .send(VerifyDeviceEvent::Cancelled {
+                            reason: "Verification cancelled by user".to_owned(),
+                        })
+                        .expect("couldn't send event");
+                    break;
                 }
             }
-            VerificationRequestState::Done | VerificationRequestState::Cancelled(_) => break,
         }
-    }
+        Ok(())
+    });
 
-    Ok(())
+    handle.await?
 }
