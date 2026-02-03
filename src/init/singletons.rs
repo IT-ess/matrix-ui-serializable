@@ -25,7 +25,6 @@ pub static REQUEST_SENDER: OnceLock<UnboundedSender<MatrixRequest>> = OnceLock::
 pub static SYNC_SERVICE: OnceLock<SyncService> = OnceLock::new();
 
 /// Flag set by `handle_rooms_loading_state` when all rooms are loaded.
-/// This is mainly used by the `has_new_refs` background check command to know
 /// if rooms have been synced or not.
 pub static ALL_ROOMS_LOADED: OnceLock<bool> = OnceLock::new();
 

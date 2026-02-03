@@ -265,11 +265,24 @@ pub async fn define_room_informations(payload: EditRoomInformationPayload) -> cr
     Ok(())
 }
 
-pub async fn register_notifications(_token: String, _user_language: String) -> anyhow::Result<()> {
+pub async fn register_notifications(
+    _token: String,
+    _user_language: String,
+    _android_sygnal_url: String,
+    _ios_sygnal_url: String,
+    _app_id: String,
+) -> anyhow::Result<()> {
     let client = CLIENT.wait();
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    crate::room::notifications::register_mobile_push_notifications(&client, _token, _user_language)
-        .await?;
+    crate::room::notifications::register_mobile_push_notifications(
+        &client,
+        _token,
+        _user_language,
+        _android_sygnal_url,
+        _ios_sygnal_url,
+        _app_id,
+    )
+    .await?;
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     crate::room::notifications::register_os_desktop_notifications(client).await;
 

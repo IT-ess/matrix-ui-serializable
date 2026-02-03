@@ -55,9 +55,12 @@ pub async fn register_mobile_push_notifications(
     client: &Client,
     token: String,
     user_language: String,
+    android_sygnal_url: String,
+    ios_sygnal_url: String,
+    app_id: String,
 ) -> anyhow::Result<()> {
-    let http_pusher = get_http_pusher(user_language.clone());
-    let pusher_ids = PusherIds::new(token, "space.lucide.refs".to_string());
+    let http_pusher = get_http_pusher(user_language.clone(), android_sygnal_url, ios_sygnal_url);
+    let pusher_ids = PusherIds::new(token, app_id);
 
     let device_display_name = client
         .encryption()
@@ -69,7 +72,7 @@ pub async fn register_mobile_push_notifications(
         .to_owned();
     let pusher = PusherInit {
         ids: pusher_ids,
-        app_display_name: "APP_NAME".to_string(),
+        app_display_name: "MATRIX_SVELTE_CLIENT".to_string(),
         device_display_name,
         profile_tag: None,
         kind: PusherKind::Http(http_pusher),
@@ -83,17 +86,17 @@ pub async fn register_mobile_push_notifications(
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn get_http_pusher(user_language: String) -> matrix_sdk::ruma::push::HttpPusherData {
+fn get_http_pusher(
+    user_language: String,
+    android_sygnal_url: String,
+    ios_sygnal_url: String,
+) -> matrix_sdk::ruma::push::HttpPusherData {
     // Due to Sygnal limitations (one instance cannot handle both FCM and APNS,
     // the gateway differs on iOS and Android)
     #[cfg(target_os = "ios")]
-    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(
-        "https://sygnal.refs.rs/_matrix/push/v1/notify".to_string(),
-    );
+    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(ios_sygnal_url);
     #[cfg(target_os = "android")]
-    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(
-        "https://android-sygnal.refs.rs/_matrix/push/v1/notify".to_string(),
-    );
+    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(android_sygnal_url);
 
     http_pusher.format = Some(matrix_sdk::ruma::push::PushFormat::EventIdOnly);
 

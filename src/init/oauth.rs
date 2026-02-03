@@ -18,24 +18,18 @@ use crate::{
 /// Generate the OAuth 2.0 client metadata.
 fn client_metadata() -> Raw<ClientMetadata> {
     let client_uri = Localized::new(
-        Url::parse("https://refs.rs").expect("Couldn't parse client URI"),
+        Url::parse("https://github.com/IT-ess/matrix-ui-serializable")
+            .expect("Couldn't parse client URI"),
         None,
     );
 
     let metadata = ClientMetadata {
         // The following fields should be displayed in the OAuth 2.0 authorization server's
         // web UI as part of the process to get the user's consent.
-        client_name: Some(Localized::new("Refs".to_owned(), [])),
-        policy_uri: Some(Localized::new(
-            Url::parse("https://refs.rs/privacy").unwrap(),
-            [],
-        )),
-        logo_uri: Some(Localized::new(
-            Url::parse("https://refs.rs/refs_logo.png").expect("couldn't parse refs logo uri"),
-            [],
-        )),
-        // TODO: add terms of service
-        tos_uri: Some(client_uri.clone()),
+        client_name: Some(Localized::new("Matrix Svelte Client".to_owned(), [])),
+        policy_uri: None,
+        logo_uri: None,
+        tos_uri: None,
         ..ClientMetadata::new(
             // This is a native application (in contrast to a web application, that runs in a
             // browser).
@@ -43,7 +37,7 @@ fn client_metadata() -> Raw<ClientMetadata> {
             // We are going to use the Authorization Code flow.
             vec![OAuthGrantType::AuthorizationCode {
                 redirect_uris: vec![
-                    Url::parse("https://refs.rs/auth-callback/")
+                    Url::parse("mxsvelte://auth-callback")
                         .expect("Couldn't parse custom URI scheme"),
                 ],
             }],
@@ -66,8 +60,7 @@ pub(crate) async fn register_and_login_oauth(
     loop {
         let OAuthAuthorizationData { url, .. } = oauth
             .login(
-                Url::parse("https://refs.rs/auth-callback/")
-                    .expect("Couldn't parse custom URI scheme"),
+                Url::parse("mxsvelte://auth-callback").expect("Couldn't parse custom URI scheme"),
                 None,
                 Some(client_metadata().into()),
                 None,
