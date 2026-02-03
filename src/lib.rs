@@ -106,6 +106,8 @@ pub struct LibConfig {
     session_option: Option<String>,
     /// A PathBuf to the application data directory
     app_data_dir: PathBuf,
+    /// A callback URL that will handle the redirection to your app when logging with the Oauth flow
+    oauth_redirect_uri: String,
 }
 
 impl LibConfig {
@@ -114,12 +116,14 @@ impl LibConfig {
         event_receivers: EventReceivers,
         session_option: Option<String>,
         app_data_dir: PathBuf,
+        redirect_uri: String,
     ) -> Self {
         Self {
             updaters,
             event_receivers,
             session_option,
             app_data_dir,
+            oauth_redirect_uri: redirect_uri,
         }
     }
 }
@@ -218,6 +222,7 @@ pub async fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                         FrontendAuthTypeResponse::Oauth => init::oauth::register_and_login_oauth(
                             &client,
                             config.event_receivers.oauth_deeplink_receiver,
+                            &config.oauth_redirect_uri,
                         )
                         .await
                         .expect("Failed to login with OAuth"),
