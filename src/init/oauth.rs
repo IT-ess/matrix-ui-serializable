@@ -7,7 +7,7 @@ use matrix_sdk::{
     ruma::serde::Raw,
 };
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use url::Url;
 
 use crate::{
@@ -16,12 +16,10 @@ use crate::{
 };
 
 /// Generate the OAuth 2.0 client metadata.
-fn client_metadata(callback_url: Url) -> Raw<ClientMetadata> {
-    let client_uri = Localized::new(
-        Url::parse("https://github.com/IT-ess/matrix-ui-serializable")
-            .expect("Couldn't parse client URI"),
-        None,
-    );
+fn client_metadata(client_uri: Url, callback_url: Url) -> Raw<ClientMetadata> {
+    let client_uri = Localized::new(client_uri, None);
+
+    debug!("Using client URI {client_uri:?} and callback_url {callback_url:?}");
 
     let metadata = ClientMetadata {
         // The following fields should be displayed in the OAuth 2.0 authorization server's
@@ -50,6 +48,7 @@ fn client_metadata(callback_url: Url) -> Raw<ClientMetadata> {
 pub(crate) async fn register_and_login_oauth(
     client: &Client,
     mut oauth_deeplink_receiver: mpsc::Receiver<Url>,
+    client_uri: &Url,
     callback_url: &Url,
 ) -> anyhow::Result<String> {
     let oauth = client.oauth();
@@ -60,7 +59,7 @@ pub(crate) async fn register_and_login_oauth(
             .login(
                 callback_url.to_owned(),
                 None,
-                Some(client_metadata(callback_url.to_owned()).into()),
+                Some(client_metadata(client_uri.to_owned(), callback_url.to_owned()).into()),
                 None,
             )
             .build()

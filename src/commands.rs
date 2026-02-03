@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use mime::Mime;
 use std::sync::Arc;
 use tracing::info;
+use url::Url;
 
 pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
 pub use matrix_sdk::ruma::{
@@ -268,8 +269,8 @@ pub async fn define_room_informations(payload: EditRoomInformationPayload) -> cr
 pub async fn register_notifications(
     _token: String,
     _user_language: String,
-    _android_sygnal_url: String,
-    _ios_sygnal_url: String,
+    _android_sygnal_url: Url,
+    _ios_sygnal_url: Url,
     _app_id: String,
 ) -> anyhow::Result<()> {
     let client = CLIENT.wait();

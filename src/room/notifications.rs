@@ -19,6 +19,8 @@ use matrix_sdk::{
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use serde_json::{Map, json};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use url::Url;
 
 //
 // TOAST Notifications (in app)
@@ -55,8 +57,8 @@ pub async fn register_mobile_push_notifications(
     client: &Client,
     token: String,
     user_language: String,
-    android_sygnal_url: String,
-    ios_sygnal_url: String,
+    android_sygnal_url: Url,
+    ios_sygnal_url: Url,
     app_id: String,
 ) -> anyhow::Result<()> {
     let http_pusher = get_http_pusher(user_language.clone(), android_sygnal_url, ios_sygnal_url);
@@ -88,15 +90,16 @@ pub async fn register_mobile_push_notifications(
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn get_http_pusher(
     user_language: String,
-    android_sygnal_url: String,
-    ios_sygnal_url: String,
+    android_sygnal_url: Url,
+    ios_sygnal_url: Url,
 ) -> matrix_sdk::ruma::push::HttpPusherData {
     // Due to Sygnal limitations (one instance cannot handle both FCM and APNS,
     // the gateway differs on iOS and Android)
     #[cfg(target_os = "ios")]
-    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(ios_sygnal_url);
+    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(ios_sygnal_url.to_string());
     #[cfg(target_os = "android")]
-    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(android_sygnal_url);
+    let mut http_pusher =
+        matrix_sdk::ruma::push::HttpPusherData::new(android_sygnal_url.to_string());
 
     http_pusher.format = Some(matrix_sdk::ruma::push::PushFormat::EventIdOnly);
 
