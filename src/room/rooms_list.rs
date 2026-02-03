@@ -117,7 +117,7 @@ static PENDING_ROOM_UPDATES: SegQueue<RoomsListUpdate> = SegQueue::new();
 /// and signals the UI that a new update is available to be handled.
 pub fn enqueue_rooms_list_update(update: RoomsListUpdate) {
     PENDING_ROOM_UPDATES.push(update);
-    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 /// UI-related info about a joined room.
@@ -182,7 +182,6 @@ pub fn handle_rooms_loading_state(mut loading_state: Subscriber<RoomListLoadingS
                 RoomListLoadingState::Loaded {
                     maximum_number_of_rooms,
                 } => {
-                    // We set the flag that is mainly used by the `has_new_refs` command
                     ALL_ROOMS_LOADED.get_or_init(|| true);
                     enqueue_rooms_list_update(RoomsListUpdate::LoadedRooms {
                         max_rooms: maximum_number_of_rooms,

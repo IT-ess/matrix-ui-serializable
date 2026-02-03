@@ -382,7 +382,7 @@ pub async fn timeline_subscriber_handler(
                                 |_e| panic!("Error: timeline update sender couldn't send TargetEventFound({new_target_event_id}, {target_event_tl_index}) to room {room_id}!")
                             );
                             // Update this room's timeline UI view.
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         else {
                             debug!("Target event not in timeline. Starting backwards pagination in room {room_id} to find target event {new_target_event_id} starting from index {starting_index}.");
@@ -555,7 +555,7 @@ pub async fn timeline_subscriber_handler(
 
 
                     // Update this room's timeline UI view.
-                    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 }
             }
 

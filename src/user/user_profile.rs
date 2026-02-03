@@ -52,7 +52,7 @@ static PENDING_USER_PROFILE_UPDATES: SegQueue<UserProfileUpdate> = SegQueue::new
 /// Enqueues a new user profile update and signals the UI that an update is available.
 pub fn enqueue_user_profile_update(update: UserProfileUpdate) {
     PENDING_USER_PROFILE_UPDATES.push(update);
-    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 /// A user profile update, which can include changes to a user's full profile

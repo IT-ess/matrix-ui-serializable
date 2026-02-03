@@ -31,7 +31,7 @@ static TOAST_NOTIFICATION: SegQueue<ToastNotificationRequest> = SegQueue::new();
 /// Toast notifications will be shown in the order they were enqueued.
 pub fn enqueue_toast_notification(notification: ToastNotificationRequest) {
     TOAST_NOTIFICATION.push(notification);
-    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 pub async fn process_toast_notifications() -> anyhow::Result<()> {
@@ -65,11 +65,11 @@ pub async fn register_mobile_push_notifications(
         .await?
         .ok_or(anyhow!("cannot get own device"))?
         .display_name()
-        .unwrap_or("Refs")
+        .unwrap_or("APP_NAME")
         .to_owned();
     let pusher = PusherInit {
         ids: pusher_ids,
-        app_display_name: "Refs".to_string(),
+        app_display_name: "APP_NAME".to_string(),
         device_display_name,
         profile_tag: None,
         kind: PusherKind::Http(http_pusher),

@@ -170,6 +170,8 @@ pub enum MatrixRequest {
         limit: u64,
         content_sender: oneshot::Sender<Result<Vec<ProfileModel>, matrix_sdk::Error>>,
     },
+    /// Create a DM room with a given UserId
+    CreateDMRoom { user_id: OwnedUserId },
     /// Create a Matrix room
     CreateRoom {
         room_name: String,
@@ -389,6 +391,13 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     topic: data.topic,
                 })
             }
+            "createDMRoom" => {
+                let data: CreateDMRoomPayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::CreateDMRoom {
+                    user_id: data.user_id,
+                })
+            }
             "inviteUsersInRoom" => {
                 let data: InviteUsersInRoomPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
@@ -422,9 +431,6 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "redactMessage",
                     // "getMatrixRoomLinkPillInfo",
                     "createDMRoom",
-                    "sendRef",
-                    "updatePersonalRef",
-                    "createRefsDMRoom",
                     "createRoom",
                     "inviteUsersInRoom",
                 ],
@@ -580,6 +586,12 @@ struct RedactMessagePayload {
 //     matrix_id: MatrixId,
 //     via: Vec<OwnedServerName>,
 // }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateDMRoomPayload {
+    user_id: OwnedUserId,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

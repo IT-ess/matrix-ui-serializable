@@ -85,12 +85,12 @@ pub fn init_broadcaster(capacity: usize) -> Result<(), &'static str> {
 }
 
 // Globally available function to broadcast messages
-pub fn broadcast_event(message: UIUpdateMessage) -> Result<usize, Box<dyn std::error::Error>> {
+pub fn broadcast_event(message: UIUpdateMessage) {
     let broadcaster = GLOBAL_BROADCASTER
         .get()
-        .ok_or("Broadcaster not initialized. Call init_broadcaster() first.")?;
+        .expect("Broadcaster not initialized. Call init_broadcaster() first.");
 
-    Ok(broadcaster.broadcast(message)?)
+    let _ = broadcaster.broadcast(message);
 }
 
 // Globally available function to create receivers

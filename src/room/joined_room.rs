@@ -464,8 +464,7 @@ pub async fn update_room(
                     debug!("Updating room {new_room_id} user power levels.");
                     match timeline_update_sender.send(TimelineUpdate::UserPowerLevels(nupl)) {
                         Ok(_) => {
-                            broadcast_event(UIUpdateMessage::RefreshUI)
-                                .expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         Err(_) => {
                             warn!("Failed to send the UserPowerLevels update to room {new_room_id}")

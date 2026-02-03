@@ -120,7 +120,7 @@ pub async fn async_worker(
                 let _paginate_task = Handle::current().spawn(async move {
                     debug!("Starting {direction} pagination request for room {room_id}...");
                     sender.send(TimelineUpdate::PaginationRunning(direction)).unwrap();
-                    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
 
                     let res = if direction == PaginationDirection::Forwards {
                         timeline.paginate_forwards(num_events).await
@@ -138,7 +138,7 @@ pub async fn async_worker(
                                 fully_paginated,
                                 direction,
                             }).unwrap();
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         Err(error) => {
                             warn!("Error sending {direction} pagination request for room {room_id}: {error:?}");
@@ -146,7 +146,7 @@ pub async fn async_worker(
                                 error,
                                 direction,
                             }).unwrap();
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                     }
                 });
@@ -189,8 +189,7 @@ pub async fn async_worker(
                             result,
                         })
                         .unwrap();
-                    broadcast_event(UIUpdateMessage::RefreshUI)
-                        .expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 });
             }
 
@@ -225,7 +224,7 @@ pub async fn async_worker(
                         .send(TimelineUpdate::EventDetailsFetched { event_id, result })
                         .unwrap();
                     broadcast_event(UIUpdateMessage::RefreshUI)
-                        .expect("Couldn't broadcast event to UI");
+                        ;
                 });
             }
 
@@ -255,8 +254,7 @@ pub async fn async_worker(
                         memberships: RoomMemberships::all(),
                         local_only: false,
                     });
-                    broadcast_event(UIUpdateMessage::RefreshUI)
-                        .expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 });
             }
             MatrixRequest::JoinRoom { room_id } => {
@@ -367,8 +365,7 @@ pub async fn async_worker(
                             .unwrap();
                     }
 
-                    broadcast_event(UIUpdateMessage::RefreshUI)
-                        .expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 });
             }
 
@@ -462,7 +459,7 @@ pub async fn async_worker(
                         UnreadMessageCount::Known(timeline.room().num_unread_messages())
                     )) {
                         Ok(_) => {
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         },
                         Err(e) => error!("Failed to send timeline update: {e:?} for GetNumberUnreadMessages request for room {room_id}"),
                     }
@@ -596,7 +593,7 @@ pub async fn async_worker(
                         if let Err(e) = timeline_update_sender.send(TimelineUpdate::TypingUsers { users }) {
                             warn!("Error: timeline update sender couldn't send the list of typing users: {e:?}");
                         }
-                        broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                        broadcast_event(UIUpdateMessage::RefreshUI);
                     }
                     debug!("Note: typing notifications recv loop has ended for room {}", room_id);
                 });
@@ -734,8 +731,7 @@ pub async fn async_worker(
                             }
                         }
                     }
-                    broadcast_event(UIUpdateMessage::RefreshUI)
-                        .expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 });
             }
 
@@ -821,8 +817,7 @@ pub async fn async_worker(
                             )) {
                                 warn!("Failed to send the result of if user can send message: {e}")
                             }
-                            broadcast_event(UIUpdateMessage::RefreshUI)
-                                .expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         Err(e) => {
                             warn!("Failed to fetch power levels for room {room_id}: {e:?}");
@@ -848,7 +843,7 @@ pub async fn async_worker(
                     debug!("Toggle Reaction to room {room_id}: ...");
                     match timeline.toggle_reaction(&timeline_event_id, &reaction).await {
                         Ok(_send_handle) => {
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                             debug!("Sent toggle reaction to room {room_id} {reaction}.")
                         },
                         Err(_e) => error!("Failed to send toggle reaction to room {room_id} {reaction}; error: {_e:?}"),
@@ -927,6 +922,59 @@ pub async fn async_worker(
                             content_sender.send(Ok(users))
                         }
                         Err(e) => content_sender.send(Err(e.into())),
+                    }
+                });
+            }
+            MatrixRequest::CreateDMRoom { user_id } => {
+                let Some(client) = CLIENT.get() else { continue };
+                // Do not create an extra if one already exists
+                if client.get_dm_room(&user_id).is_some() {
+                    enqueue_toast_notification(ToastNotificationRequest::new(
+                        format!("A DM room already exists for user {user_id}"),
+                        None,
+                        ToastNotificationVariant::Error,
+                    ));
+                    continue;
+                }
+                let _create_dm_room_task = Handle::current().spawn(async move {
+                    let mut request = create_room::v3::Request::new();
+                    request.is_direct = true;
+                    request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Private;
+                    request.invite = vec![user_id.clone()];
+                    request.preset = Some(create_room::v3::RoomPreset::TrustedPrivateChat);
+                    request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V12);
+
+                    match client.create_room(request).await {
+                        Ok(room) => {
+                            info!("Sucessfully created DM room with user {user_id}");
+                            if let Err(e) = room.enable_encryption().await {
+                                enqueue_toast_notification(ToastNotificationRequest::new(
+                                    format!("Failed to enable encryption in Room. Error: {e}"),
+                                    None,
+                                    ToastNotificationVariant::Error,
+                                ))
+                            } else {
+                                info!("Enabled encryption for personal room");
+                                enqueue_toast_notification(ToastNotificationRequest::new(
+                                    format!("Sucessfully created DM room for user {user_id}"),
+                                    None,
+                                    ToastNotificationVariant::Success,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to create DM room for user {user_id}, error: {:?}",
+                                e
+                            );
+                            enqueue_toast_notification(ToastNotificationRequest::new(
+                                format!(
+                                    "Failed to create DM room for user {user_id}, error: {e:?}"
+                                ),
+                                None,
+                                ToastNotificationVariant::Error,
+                            ));
+                        }
                     }
                 });
             }
