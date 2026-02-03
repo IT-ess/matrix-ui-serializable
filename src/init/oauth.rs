@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Generate the OAuth 2.0 client metadata.
-fn client_metadata(callback_url: &str) -> Raw<ClientMetadata> {
+fn client_metadata(callback_url: Url) -> Raw<ClientMetadata> {
     let client_uri = Localized::new(
         Url::parse("https://github.com/IT-ess/matrix-ui-serializable")
             .expect("Couldn't parse client URI"),
@@ -36,9 +36,7 @@ fn client_metadata(callback_url: &str) -> Raw<ClientMetadata> {
             ApplicationType::Native,
             // We are going to use the Authorization Code flow.
             vec![OAuthGrantType::AuthorizationCode {
-                redirect_uris: vec![
-                    Url::parse(callback_url).expect("Couldn't parse custom URI scheme"),
-                ],
+                redirect_uris: vec![callback_url],
             }],
             client_uri,
         )
@@ -52,7 +50,7 @@ fn client_metadata(callback_url: &str) -> Raw<ClientMetadata> {
 pub(crate) async fn register_and_login_oauth(
     client: &Client,
     mut oauth_deeplink_receiver: mpsc::Receiver<Url>,
-    callback_url: &str,
+    callback_url: &Url,
 ) -> anyhow::Result<String> {
     let oauth = client.oauth();
 
@@ -60,9 +58,9 @@ pub(crate) async fn register_and_login_oauth(
     loop {
         let OAuthAuthorizationData { url, .. } = oauth
             .login(
-                Url::parse(callback_url).expect("Couldn't parse custom URI scheme"),
+                callback_url.to_owned(),
                 None,
-                Some(client_metadata(callback_url).into()),
+                Some(client_metadata(callback_url.to_owned()).into()),
                 None,
             )
             .build()

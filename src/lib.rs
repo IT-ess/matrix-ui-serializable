@@ -107,7 +107,7 @@ pub struct LibConfig {
     /// A PathBuf to the application data directory
     app_data_dir: PathBuf,
     /// A callback URL that will handle the redirection to your app when logging with the Oauth flow
-    oauth_redirect_uri: String,
+    oauth_redirect_uri: Url,
 }
 
 impl LibConfig {
@@ -116,14 +116,14 @@ impl LibConfig {
         event_receivers: EventReceivers,
         session_option: Option<String>,
         app_data_dir: PathBuf,
-        redirect_uri: String,
+        oauth_redirect_uri: Url,
     ) -> Self {
         Self {
             updaters,
             event_receivers,
             session_option,
             app_data_dir,
-            oauth_redirect_uri: redirect_uri,
+            oauth_redirect_uri,
         }
     }
 }
