@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, warn};
-use ts_rs::TS;
 
 use crossbeam_queue::SegQueue;
 use eyeball::Subscriber;
@@ -124,9 +123,8 @@ pub fn enqueue_rooms_list_update(update: RoomsListUpdate) {
 ///
 /// This includes info needed display a preview of that room in the RoomsList
 /// and to filter the list of rooms based on the current search filter.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct JoinedRoomInfo {
     /// The matrix ID of this room.
     pub(crate) room_id: OwnedRoomId,
@@ -194,17 +192,14 @@ pub fn handle_rooms_loading_state(mut loading_state: Subscriber<RoomListLoadingS
 
 /// The struct containing all the data related to the homepage rooms list.
 /// Fields are not exposed to the adapter directly, the adapter can only serialize this struct.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RoomsList {
     // We manually put the Record type, otherwise it generates a weird type with undefined
-    #[ts(type = "Record<string, InvitedRoomInfo>")]
     /// The list of all rooms that the user has been invited to.
     invited_rooms: HashMap<OwnedRoomId, InvitedRoomInfo>,
 
     // We manually put the Record type, otherwise it generates a weird type with undefined
-    #[ts(type = "Record<string, JoinedRoomInfo>")]
     /// The set of all joined rooms and their cached preview info.
     all_joined_rooms: HashMap<OwnedRoomId, JoinedRoomInfo>,
 
@@ -256,7 +251,7 @@ pub struct RoomsList {
     state_updaters: Arc<Box<dyn StateUpdater>>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",

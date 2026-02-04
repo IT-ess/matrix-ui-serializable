@@ -20,7 +20,6 @@ use matrix_sdk_ui::{
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use tokio::sync::watch;
 use tracing::{debug, error, trace};
-use ts_rs::TS;
 
 use crate::{
     events::event_preview::text_preview_of_timeline_item,
@@ -158,18 +157,13 @@ pub static TIMELINE_STATES: Mutex<BTreeMap<OwnedRoomId, TimelineUiState>> =
 /// across multiple `Hide`/`Show` cycles of that room's timeline within a RoomScreen.
 /// If a state is more temporary and shouldn't be persisted when the timeline is hidden,
 /// then it should be stored in the RoomScreen widget itself, not in this struct.
-#[derive(Debug, TS)]
+#[derive(Debug)]
 pub struct TimelineUiState {
     /// The ID of the room that this timeline is for.
-    #[ts(rename = "roomId")]
     pub(crate) room_id: OwnedRoomId,
 
     /// The power levels of the currently logged-in user in this room.
-    #[ts(
-        type = "(| 'ban' | 'invite' | 'kick' | 'redact' | 'notifyRoom' | 'location' | 'message' | 'reaction' | 'roomMessage' | 'roomRedaction' | 'sticker' | 'roomPinnedEvents')[]"
-    )]
     // The TS type corresponds to how power levels are serialized in frontend.
-    #[ts(rename = "userPower")]
     pub(crate) user_power: UserPowerLevels,
 
     /// Whether this room's timeline has been fully paginated, which means
@@ -177,11 +171,9 @@ pub struct TimelineUiState {
     /// When `true`, further backwards pagination requests will not be sent.
     ///
     /// This must be reset to `false` whenever the timeline is fully cleared.
-    #[ts(rename = "fullyPaginated")]
     pub(crate) fully_paginated: bool,
 
     /// The list of items (events) in this room's timeline that our client currently knows about.
-    #[ts(type = "TimelineItem[]")]
     pub(crate) items: Vector<Arc<TimelineItem>>,
 
     /// The channel receiver for timeline updates for this room.
@@ -190,13 +182,11 @@ pub struct TimelineUiState {
     /// in a sync context and the sender runs in an async context,
     /// which is okay because a sender on an unbounded channel never needs to block.
     /// Not included in frontend serialization
-    #[ts(skip)]
     pub(crate) update_receiver: crossbeam_channel::Receiver<TimelineUpdate>,
 
     /// The sender for timeline requests from a RoomScreen showing this room
     /// to the background async task that handles this room's timeline updates.
     /// Not included in frontend serialization
-    #[ts(skip)]
     pub(crate) request_sender: TimelineRequestSender,
 
     /// Whether the user has scrolled past their latest read marker.
@@ -209,10 +199,7 @@ pub struct TimelineUiState {
     /// for the last visible event in the timeline.
     ///
     /// When new message come in, this value is reset to `false`.
-    #[ts(rename = "scrolledPastReadMarker")]
     pub(crate) scrolled_past_read_marker: bool,
-    #[ts(rename = "latestOwnUserReceipt")]
-    #[ts(type = "{ ts: number }")]
     pub(crate) latest_own_user_receipt: Option<Receipt>,
 }
 

@@ -1,7 +1,6 @@
 use matrix_sdk::ruma::{OwnedEventId, OwnedUserId};
 use matrix_sdk_ui::timeline::ThreadSummary;
 use serde::Serialize;
-use ts_rs::TS;
 
 use crate::events::{
     event_preview::text_preview_of_timeline_item, handlers::get_sender_username_from_profile,
@@ -27,7 +26,7 @@ pub fn get_frontend_thread_summary(thread_summary: ThreadSummary) -> Option<Fron
     }
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 /// The mapped thread summary containing the latest item in this thread + additionnal infos.
 pub struct FrontendThreadSummary {

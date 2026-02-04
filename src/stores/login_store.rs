@@ -3,11 +3,9 @@ use std::ops::{Deref, DerefMut};
 use matrix_sdk::encryption::VerificationState;
 use matrix_sdk_ui::sync_service;
 use serde::{Serialize, Serializer, ser::SerializeStruct};
-use ts_rs::TS;
 
 /// Wether the user has logged in, or is in another state.
-#[derive(Debug, PartialEq, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LoginState {
     Initiating,

@@ -12,7 +12,6 @@ use matrix_sdk_ui::timeline::TimelineEventItemId;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use tokio::sync::oneshot;
-use ts_rs::TS;
 
 use crate::{
     events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER,
@@ -511,9 +510,8 @@ struct GetNumberUnreadMessagesPayload {
 //     room_id: OwnedRoomId,
 // }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 struct SendMessagePayload {
     room_id: OwnedRoomId,
     message: RoomMessageEventContent,
@@ -571,9 +569,8 @@ struct ToggleReactionPayload {
     reaction: String,
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 struct RedactMessagePayload {
     room_id: OwnedRoomId,
     timeline_event_id: OwnedEventId,

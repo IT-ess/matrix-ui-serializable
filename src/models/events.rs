@@ -1,6 +1,5 @@
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedRoomId};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 // Listen to events
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -33,9 +32,8 @@ pub struct MatrixUpdateCurrentActiveRoom {
 }
 
 /// The user's account credentials to create a new Matrix session
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct MatrixLoginPayload {
     pub username: String,
     pub password: String,
@@ -159,14 +157,13 @@ pub enum MediaStreamEvent {
     },
 }
 
-#[derive(Clone, Serialize, TS)]
+#[derive(Clone, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     tag = "event",
     content = "data"
 )]
-#[ts(export)]
 pub enum VerifyDeviceEvent {
     Requested,
     Done,
@@ -174,9 +171,8 @@ pub enum VerifyDeviceEvent {
 }
 
 // Commands
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct FrontendDevice {
     pub device_id: OwnedDeviceId,
     pub is_verified: bool,
@@ -187,7 +183,7 @@ pub struct FrontendDevice {
     pub is_current_device: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DeviceGuessedType {
     Android,

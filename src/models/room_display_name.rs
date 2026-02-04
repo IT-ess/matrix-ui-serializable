@@ -2,9 +2,8 @@ use std::ops::{Deref, DerefMut};
 
 use matrix_sdk::RoomDisplayName;
 use serde::{Serialize, Serializer};
-use ts_rs::TS;
 
-#[derive(Debug, Clone, TS)]
+#[derive(Debug, Clone)]
 pub struct FrontendRoomDisplayName(RoomDisplayName);
 
 impl Deref for FrontendRoomDisplayName {

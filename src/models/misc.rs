@@ -1,10 +1,8 @@
 use matrix_sdk::ruma::{OwnedMxcUri, OwnedRoomId};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 /// Payload to edit current user's information.
 /// Only the Some(...) fields are updated, None are ignored.
 pub struct EditUserInformationPayload {
@@ -13,9 +11,8 @@ pub struct EditUserInformationPayload {
     pub new_device_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 /// Payload to edit current user's information.
 /// Only the Some(...) fields are updated, None are ignored.
 pub struct EditRoomInformationPayload {

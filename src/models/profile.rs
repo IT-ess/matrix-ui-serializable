@@ -2,11 +2,9 @@ use matrix_sdk::ruma::{
     OwnedMxcUri, OwnedUserId, api::client::user_directory::search_users::v3::User,
 };
 use serde::Serialize;
-use ts_rs::TS;
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct ProfileModel {
     pub user_id: OwnedUserId,
     pub display_name: Option<String>,

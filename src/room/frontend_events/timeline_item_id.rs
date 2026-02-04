@@ -4,9 +4,8 @@ use matrix_sdk::ruma::{OwnedEventId, OwnedTransactionId};
 use matrix_sdk_ui::timeline::TimelineEventItemId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use serde_json::Value;
-use ts_rs::TS;
 
-#[derive(Debug, Clone, TS)]
+#[derive(Debug, Clone)]
 pub struct FrontendTimelineEventItemId(TimelineEventItemId);
 
 impl FrontendTimelineEventItemId {

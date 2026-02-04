@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 use std::sync::Arc;
-use ts_rs::TS;
 
 use matrix_sdk::ruma::{
     OwnedEventId, OwnedRoomId, UInt, event_id, events::room::message::MessageType,
@@ -30,27 +29,23 @@ use super::{
     virtual_event::FrontendVirtualTimelineItem,
 };
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct FrontendTimelineItem {
     unique_id: String,
     event_id: Option<OwnedEventId>,
     #[serde(flatten)]
-    #[ts(skip)] // Manually typed because flatten isn't compatible
     timeline_item_id: FrontendTimelineEventItemId,
     #[serde(flatten)]
     data: FrontendTimelineItemData,
-    #[ts(type = "number | null")]
     timestamp: Option<UInt>, // We keep the timestamp at root to sort events
     is_own: bool,
     is_local: bool,
-    #[ts(skip)] // This one stays manually typed
     abilities: MessageAbilities,
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -60,13 +55,12 @@ pub struct FrontendTimelineItem {
 pub enum FrontendTimelineItemData {
     MsgLike(FrontendMsgLikeContent),
     Virtual(FrontendVirtualTimelineItem),
-    #[ts(skip)] // This one stays manually typed
     StateChange(FrontendStateEvent),
     Error(FrontendTimelineErrorItem),
     Call,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendTimelineErrorItem {
     error: String,

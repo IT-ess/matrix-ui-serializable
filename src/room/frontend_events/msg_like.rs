@@ -14,11 +14,10 @@ use matrix_sdk::ruma::{
 };
 use matrix_sdk_ui::timeline::ReactionsByKeyBySender;
 use serde::{Serialize, Serializer};
-use ts_rs::TS;
 
 use crate::room::frontend_events::thread_summary::FrontendThreadSummary;
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -54,11 +53,9 @@ pub enum FrontendMsgLikeKind {
     Video(VideoMessageEventContent),
 
     /// A request to initiate a key verification.
-    #[ts(skip)]
     VerificationRequest(KeyVerificationRequestEventContent),
 
     /// An `m.sticker` event.
-    #[ts(skip)] // This one will be manually typed
     Sticker(Box<FrontendStickerEventContent>),
 
     /// An `m.poll.start` event.
@@ -77,7 +74,7 @@ pub enum FrontendMsgLikeKind {
 /// A special kind of [`super::TimelineItemContent`] that groups together
 /// different room message types with their respective reactions and thread
 /// information.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendMsgLikeContent {
     #[serde(flatten)]

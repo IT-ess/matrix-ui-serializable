@@ -2,13 +2,11 @@ use matrix_sdk::ruma::{
     MilliSecondsSinceUnixEpoch, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
 };
 use serde::Serialize;
-use ts_rs::TS;
 
 use crate::models::room_display_name::FrontendRoomDisplayName;
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct InvitedRoomInfo {
     /// The matrix ID of this room.
     pub room_id: OwnedRoomId,
@@ -33,7 +31,7 @@ pub struct InvitedRoomInfo {
 }
 
 /// Info about the user who invited us to a room.
-#[derive(Clone, Serialize, TS)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviterInfo {
     pub user_id: OwnedUserId,
@@ -51,7 +49,7 @@ impl std::fmt::Debug for InviterInfo {
 }
 
 /// The state of a pending invite.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum InviteState {
     /// Waiting for the user to accept or decline the invite.

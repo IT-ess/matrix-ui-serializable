@@ -7,7 +7,6 @@ use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
 use tracing::{debug, error, trace, warn};
-use ts_rs::TS;
 
 use crate::{
     events::timeline::{
@@ -26,8 +25,7 @@ use crate::{
 
 /// A serializable struct representing the state of a given Matrix Room.
 /// Fields are not exposed to the adapter directly, the adapter can only serialize this struct.
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomScreen {
     /// The room ID of the currently-shown room.
@@ -528,12 +526,11 @@ fn find_new_item_matching_current_item(
     None
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendRoomMember {
     name: String,
     // This looks shitty but we cannot use serde flatten and ts_rs type together
-    #[ts(type = "{ userPowerLevel: boolean | number }")]
     max_power_level: FrontendUserPowerLevel,
     display_name_ambiguous: bool,
     is_ignored: bool,
