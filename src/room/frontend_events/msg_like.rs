@@ -59,7 +59,7 @@ pub enum FrontendMsgLikeKind {
 
     /// An `m.sticker` event.
     #[ts(skip)] // This one will be manually typed
-    Sticker(FrontendStickerEventContent),
+    Sticker(Box<FrontendStickerEventContent>),
 
     /// An `m.poll.start` event.
     Poll, //(PollState), // Todo: implement poll state display

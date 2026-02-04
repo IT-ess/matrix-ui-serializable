@@ -293,8 +293,8 @@ pub(super) fn map_timeline_event_item_content(
                         thread_root,
                         thread_summary,
                         in_reply_to_id,
-                        kind: FrontendMsgLikeKind::Sticker(FrontendStickerEventContent::from(
-                            sticker.content().clone(),
+                        kind: FrontendMsgLikeKind::Sticker(Box::new(
+                            FrontendStickerEventContent::from(sticker.content().clone()),
                         )),
                     }),
                 },
