@@ -4,7 +4,7 @@ use crate::{
     FrontendVerificationState,
     init::{
         login::build_client,
-        singletons::{APP_DATA_DIR, CLIENT, TEMP_CLIENT_SESSION, get_event_bridge},
+        singletons::{CLIENT, TEMP_CLIENT_SESSION, get_event_bridge},
     },
     models::{
         async_requests::MatrixRequest,
@@ -140,10 +140,7 @@ pub async fn verify_device(
 pub async fn disconnect_user() -> crate::Result<()> {
     let client = CLIENT.wait();
     // Logout the session
-    client.logout().await?;
-    // clear the db folder
-    std::fs::remove_dir_all(APP_DATA_DIR.get().unwrap().clone().join("surreal"))
-        .map_err(|e| e.into())
+    client.logout().await.map_err(|e| e.into())
 }
 
 /// Disconnect the connected user
