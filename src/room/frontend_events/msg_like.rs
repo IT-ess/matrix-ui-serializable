@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
+use indexmap::IndexMap;
 use matrix_sdk::ruma::{
-    OwnedEventId,
+    MilliSecondsSinceUnixEpoch, OwnedEventId,
     events::{
         room::message::{
             AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent,
@@ -12,7 +13,7 @@ use matrix_sdk::ruma::{
         sticker::{StickerEventContent, StickerMediaSource},
     },
 };
-use matrix_sdk_ui::timeline::ReactionsByKeyBySender;
+use matrix_sdk_ui::timeline::{ReactionInfo, ReactionStatus, ReactionsByKeyBySender};
 use serde::{Serialize, Serializer};
 
 use crate::room::frontend_events::thread_summary::FrontendThreadSummary;
@@ -80,7 +81,7 @@ pub struct FrontendMsgLikeContent {
     #[serde(flatten)]
     pub kind: FrontendMsgLikeKind,
     /// Map of user reactions to this message
-    pub reactions: ReactionsByKeyBySender,
+    pub reactions: SerializableReactions,
     /// Event ID of the thread root, if this is a threaded message.
     pub thread_root: Option<OwnedEventId>,
     // /// Information about the thread this message is the root of, if any.
@@ -93,6 +94,94 @@ pub struct FrontendMsgLikeContent {
     pub sender: Option<String>,
     /// Sender id of the event
     pub sender_id: String,
+}
+
+// Wrap ReactionsByKeyBySender, and implement Serialize on it
+
+#[derive(Debug)]
+pub struct SerializableReactions(pub ReactionsByKeyBySender);
+
+impl Serialize for SerializableReactions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let converted = self
+            .0
+            .iter()
+            .map(|(key, sender_map)| {
+                (
+                    key.clone(),
+                    sender_map
+                        .iter()
+                        .map(|(uid, info)| (uid.to_string(), SerializableReactionInfo::from(info)))
+                        .collect::<IndexMap<_, _>>(),
+                )
+            })
+            .collect::<IndexMap<_, _>>();
+
+        converted.serialize(serializer)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SerializableReactionInfo {
+    pub timestamp: MilliSecondsSinceUnixEpoch,
+    pub status: SerializableReactionStatus,
+}
+
+impl From<&ReactionInfo> for SerializableReactionInfo {
+    fn from(info: &ReactionInfo) -> Self {
+        Self {
+            timestamp: info.timestamp.clone(),
+            status: (&info.status).into(),
+        }
+    }
+}
+
+// Now derive Serialize (since both fields are serializable)
+impl Serialize for SerializableReactionInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("timestamp", &self.timestamp)?;
+        map.serialize_entry("status", &self.status)?;
+        map.end()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum SerializableReactionStatus {
+    LocalToLocal,
+    LocalToRemote,
+    RemoteToRemote,
+}
+
+impl From<&ReactionStatus> for SerializableReactionStatus {
+    fn from(status: &ReactionStatus) -> Self {
+        match status {
+            ReactionStatus::LocalToLocal(_) => Self::LocalToLocal,
+            ReactionStatus::LocalToRemote(_) => Self::LocalToRemote,
+            ReactionStatus::RemoteToRemote(_) => Self::RemoteToRemote,
+        }
+    }
+}
+
+impl Serialize for SerializableReactionStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let status_str = match self {
+            Self::LocalToLocal => "localToLocal",
+            Self::LocalToRemote => "localToRemote",
+            Self::RemoteToRemote => "remoteToRemote",
+        };
+        serializer.serialize_str(status_str)
+    }
 }
 
 // New type pattern to add the msgtype field to serialization

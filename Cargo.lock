@@ -2080,6 +2080,7 @@ dependencies = [
  "futures",
  "futures-util",
  "htmlize",
+ "indexmap",
  "linkify",
  "matrix-sdk",
  "matrix-sdk-ui",

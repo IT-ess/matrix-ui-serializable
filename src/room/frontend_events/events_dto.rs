@@ -12,7 +12,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{
     room::frontend_events::{
-        msg_like::FrontendStickerEventContent,
+        msg_like::{FrontendStickerEventContent, SerializableReactions},
         state_event::{
             FrontendAnyOtherFullStateEventContent, FrontendMemberProfileChange,
             FrontendRoomMembershipChange, FrontendStateEvent,
@@ -262,7 +262,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: message.is_edited(),
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
@@ -281,7 +281,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: false,
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
@@ -302,7 +302,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: true,
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
@@ -321,7 +321,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: false,
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
@@ -341,7 +341,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: false,
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
@@ -361,7 +361,7 @@ pub(super) fn map_timeline_event_item_content(
                     abilities,
                     data: FrontendTimelineItemData::MsgLike(FrontendMsgLikeContent {
                         edited: false,
-                        reactions: msg_like.reactions.clone(),
+                        reactions: SerializableReactions(msg_like.reactions.clone()),
                         sender_id,
                         sender,
                         thread_root,
