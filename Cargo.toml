@@ -1,6 +1,6 @@
 [package]
 name = "matrix-ui-serializable"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["IT-ess"]
 description = "Opinionated abstraction of the matrix-sdk crate with serializable structs"
 edition = "2024"

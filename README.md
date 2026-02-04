@@ -67,6 +67,9 @@ The Matrix DB and app files will be stored there. Just provide a `PathBuf` to th
 
 `oauth_client_uri` and `oauth_redirect_uri` that will be used in case of an OAuth login flow.
 
+# Contributing
+This project is opened to all kinds of contributions. I'm aware that the [documentation](https://docs.rs/matrix-ui-serializable) isn't exhaustive and I do not have enough time to make it so. I can still [answer some questions](#chat-about-this-project) if needed !
+
 # Possible improvements
 
 The approach of this wrapper is quite simple, we make things serializable and we call the frontend updaters every time needed. Obviously, there is some room for performance improvements, since serialization costs a lot.
@@ -80,3 +83,4 @@ Join this [Matrix room](https://matrix.to/#/#matrix-ui-serializable:matrix.org) 
 # Credits
 
 Huge thanks to [Kevin Boos](https://github.com/kevinaboos) and the [Robius project](https://github.com/project-robius) team for their awesome work on the [Robrix](https://github.com/project-robius/robrix) client that inspired me for this different implementation.
+Also, shoutout to the Element and Matrix.org team for the wonderful and *blazingly fast* matrix-rust-sdk.
