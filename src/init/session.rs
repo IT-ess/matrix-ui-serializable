@@ -2,7 +2,13 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use matrix_sdk::{AuthSession, Client};
+use matrix_sdk::{
+    AuthSession, Client,
+    authentication::{
+        matrix::MatrixSession,
+        oauth::{ClientId, OAuthSession, UserSession},
+    },
+};
 
 use std::sync::Arc;
 
@@ -42,14 +48,71 @@ impl ClientSession {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FullMatrixSession {
     pub client_session: ClientSession,
-    pub user_session: AuthSession,
+    pub user_session: SerializableAuthSession,
+}
+
+/// A user session using one of the available authentication APIs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SerializableAuthSession {
+    /// A session using the native Matrix authentication API.
+    Matrix(MatrixSession),
+
+    /// A session using the OAuth 2.0 API.
+    OAuth(SerializableOAuthSession),
+}
+
+impl From<AuthSession> for SerializableAuthSession {
+    fn from(value: AuthSession) -> Self {
+        match value {
+            AuthSession::Matrix(m) => Self::Matrix(m),
+            AuthSession::OAuth(o) => Self::OAuth(o.into()),
+            _ => panic!("This type of auth is not yet supported"),
+        }
+    }
+}
+
+impl From<SerializableAuthSession> for AuthSession {
+    fn from(value: SerializableAuthSession) -> Self {
+        match value {
+            SerializableAuthSession::Matrix(m) => Self::Matrix(m),
+            SerializableAuthSession::OAuth(o) => Self::OAuth(Box::new(o.into())),
+        }
+    }
+}
+
+/// A full session for the OAuth 2.0 API, with the serialize trait.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableOAuthSession {
+    /// The client ID obtained after registration.
+    pub client_id: ClientId,
+
+    /// The user session.
+    pub user: UserSession,
+}
+
+impl From<Box<OAuthSession>> for SerializableOAuthSession {
+    fn from(value: Box<OAuthSession>) -> Self {
+        Self {
+            client_id: value.client_id,
+            user: value.user,
+        }
+    }
+}
+
+impl From<SerializableOAuthSession> for OAuthSession {
+    fn from(value: SerializableOAuthSession) -> Self {
+        Self {
+            client_id: value.client_id,
+            user: value.user,
+        }
+    }
 }
 
 impl FullMatrixSession {
     pub fn new(client_session: ClientSession, user_session: AuthSession) -> Self {
         FullMatrixSession {
             client_session,
-            user_session,
+            user_session: user_session.into(),
         }
     }
 }

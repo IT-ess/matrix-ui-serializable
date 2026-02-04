@@ -133,7 +133,7 @@ pub struct SerializableReactionInfo {
 impl From<&ReactionInfo> for SerializableReactionInfo {
     fn from(info: &ReactionInfo) -> Self {
         Self {
-            timestamp: info.timestamp.clone(),
+            timestamp: info.timestamp,
             status: (&info.status).into(),
         }
     }
