@@ -1,18 +1,20 @@
-use std::{iter::Peekable, sync::Arc};
+use std::{iter::Peekable, ops::Deref, sync::Arc};
 
 use anyhow::bail;
 use eyeball::Subscriber;
 use futures::{StreamExt, pin_mut};
-use matrix_sdk::{Client, Room};
+use matrix_sdk::Client;
 use matrix_sdk_ui::{
     RoomListService,
     eyeball_im::{Vector, VectorDiff},
+    room_list_service::RoomListItem,
     sync_service::{self, SyncService},
 };
 use tokio::runtime::Handle;
+use tracing::{debug, error, trace};
 
 use crate::{
-    init::singletons::{ALL_JOINED_ROOMS, LOG_ROOM_LIST_DIFFS, SYNC_SERVICE},
+    init::singletons::SYNC_SERVICE,
     models::state_updater::StateUpdater,
     room::{
         joined_room::{RoomListServiceRoomInfo, add_new_room, remove_room, update_room},
@@ -57,40 +59,34 @@ pub async fn sync(
             match diff {
                 VectorDiff::Append { values: new_rooms } => {
                     let _num_new_rooms = new_rooms.len();
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Append {_num_new_rooms}");
-                    }
+                    trace!("room_list: diff Append {_num_new_rooms}");
                     for new_room in new_rooms {
+                        let new_room =
+                            RoomListServiceRoomInfo::from_room(new_room.into_inner()).await;
                         add_new_room(&new_room, &room_list_service).await?;
-                        all_known_rooms.push_back(new_room.into());
+                        all_known_rooms.push_back(new_room);
                     }
                 }
                 VectorDiff::Clear => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Clear");
-                    }
+                    trace!("room_list: diff Clear");
                     all_known_rooms.clear();
-                    ALL_JOINED_ROOMS.lock().unwrap().clear();
+                    crate::room::joined_room::clear_all_rooms();
                     enqueue_rooms_list_update(RoomsListUpdate::ClearRooms);
                 }
                 VectorDiff::PushFront { value: new_room } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff PushFront");
-                    }
+                    trace!("room_list: diff PushFront");
+                    let new_room = RoomListServiceRoomInfo::from_room(new_room.into_inner()).await;
                     add_new_room(&new_room, &room_list_service).await?;
-                    all_known_rooms.push_front(new_room.into());
+                    all_known_rooms.push_front(new_room);
                 }
                 VectorDiff::PushBack { value: new_room } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff PushBack");
-                    }
+                    trace!("room_list: diff PushBack");
+                    let new_room = RoomListServiceRoomInfo::from_room(new_room.into_inner()).await;
                     add_new_room(&new_room, &room_list_service).await?;
-                    all_known_rooms.push_back(new_room.into());
+                    all_known_rooms.push_back(new_room);
                 }
                 remove_diff @ VectorDiff::PopFront => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff PopFront");
-                    }
+                    trace!("room_list: diff PopFront");
                     if let Some(room) = all_known_rooms.pop_front() {
                         optimize_remove_then_add_into_update(
                             remove_diff,
@@ -103,9 +99,7 @@ pub async fn sync(
                     }
                 }
                 remove_diff @ VectorDiff::PopBack => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff PopBack");
-                    }
+                    trace!("room_list: diff PopBack");
                     if let Some(room) = all_known_rooms.pop_back() {
                         optimize_remove_then_add_into_update(
                             remove_diff,
@@ -121,32 +115,29 @@ pub async fn sync(
                     index,
                     value: new_room,
                 } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Insert at {index}");
-                    }
+                    trace!("room_list: diff Insert at {index}");
+                    let new_room = RoomListServiceRoomInfo::from_room(new_room.into_inner()).await;
                     add_new_room(&new_room, &room_list_service).await?;
-                    all_known_rooms.insert(index, new_room.into());
+                    all_known_rooms.insert(index, new_room);
                 }
                 VectorDiff::Set {
                     index,
                     value: changed_room,
                 } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Set at {index}");
-                    }
+                    trace!("room_list: diff Set at {index}");
+                    let changed_room =
+                        RoomListServiceRoomInfo::from_room(changed_room.into_inner()).await;
                     if let Some(old_room) = all_known_rooms.get(index) {
                         update_room(old_room, &changed_room, &room_list_service).await?;
                     } else {
-                        eprintln!("BUG: room list diff: Set index {index} was out of bounds.");
+                        error!("BUG: room list diff: Set index {index} was out of bounds.");
                     }
-                    all_known_rooms.set(index, changed_room.into());
+                    all_known_rooms.set(index, changed_room);
                 }
                 remove_diff @ VectorDiff::Remove {
                     index: remove_index,
                 } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Remove at {remove_index}");
-                    }
+                    trace!("room_list: diff Remove at {remove_index}");
                     if remove_index < all_known_rooms.len() {
                         let room = all_known_rooms.remove(remove_index);
                         optimize_remove_then_add_into_update(
@@ -158,16 +149,14 @@ pub async fn sync(
                         )
                         .await?;
                     } else {
-                        eprintln!(
+                        error!(
                             "BUG: room_list: diff Remove index {remove_index} out of bounds, len {}",
                             all_known_rooms.len()
                         );
                     }
                 }
                 VectorDiff::Truncate { length } => {
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!("room_list: diff Truncate to {length}");
-                    }
+                    trace!("room_list: diff Truncate to {length}");
                     // Iterate manually so we can know which rooms are being removed.
                     while all_known_rooms.len() > length {
                         if let Some(room) = all_known_rooms.pop_back() {
@@ -178,30 +167,27 @@ pub async fn sync(
                 }
                 VectorDiff::Reset { values: new_rooms } => {
                     // We implement this by clearing all rooms and then adding back the new values.
-                    if LOG_ROOM_LIST_DIFFS {
-                        println!(
-                            "room_list: diff Reset, old length {}, new length {}",
-                            all_known_rooms.len(),
-                            new_rooms.len()
-                        );
-                    }
+                    trace!(
+                        "room_list: diff Reset, old length {}, new length {}",
+                        all_known_rooms.len(),
+                        new_rooms.len()
+                    );
                     // Iterate manually so we can know which rooms are being removed.
                     while let Some(room) = all_known_rooms.pop_back() {
                         remove_room(&room);
                     }
                     // ALL_JOINED_ROOMS should already be empty due to successive calls to `remove_room()`,
                     // so this is just a sanity check.
-                    ALL_JOINED_ROOMS.lock().unwrap().clear();
+                    crate::room::joined_room::clear_all_rooms();
                     enqueue_rooms_list_update(RoomsListUpdate::ClearRooms);
-                    for room in &new_rooms {
-                        add_new_room(room, &room_list_service).await?;
+                    for new_room in new_rooms.into_iter() {
+                        let new_room =
+                            RoomListServiceRoomInfo::from_room(new_room.into_inner()).await;
+                        add_new_room(&new_room, &room_list_service).await?;
+                        all_known_rooms.push_back(new_room);
                     }
-                    all_known_rooms = new_rooms.into_iter().map(|r| r.into()).collect();
                 }
             }
-            // We commit events to db every time there is a change. It shouldn't be expensive if the queue is
-            // empty, but this could be improved.
-            crate::seshat::commands::commit_live_events().await?;
         }
     }
 
@@ -218,9 +204,9 @@ pub async fn sync(
 /// This tends to happen frequently in order to change the room's state
 /// or to "sort" the room list by changing its positional order.
 async fn optimize_remove_then_add_into_update(
-    remove_diff: VectorDiff<Room>,
+    remove_diff: VectorDiff<RoomListItem>,
     room: &RoomListServiceRoomInfo,
-    peekable_diffs: &mut Peekable<impl Iterator<Item = VectorDiff<matrix_sdk::Room>>>,
+    peekable_diffs: &mut Peekable<impl Iterator<Item = VectorDiff<RoomListItem>>>,
     all_known_rooms: &mut Vector<RoomListServiceRoomInfo>,
     room_list_service: &RoomListService,
 ) -> anyhow::Result<()> {
@@ -230,36 +216,33 @@ async fn optimize_remove_then_add_into_update(
             index: insert_index,
             value: new_room,
         }) if room.room_id == new_room.room_id() => {
-            if LOG_ROOM_LIST_DIFFS {
-                println!(
-                    "Optimizing {remove_diff:?} + Insert({insert_index}) into Update for room {}",
-                    room.room_id
-                );
-            }
-            update_room(room, new_room, room_list_service).await?;
-            all_known_rooms.insert(*insert_index, new_room.clone().into());
+            trace!(
+                "Optimizing {remove_diff:?} + Insert({insert_index}) into Update for room {}",
+                room.room_id
+            );
+            let new_room = RoomListServiceRoomInfo::from_room_ref(new_room.deref()).await;
+            update_room(room, &new_room, room_list_service).await?;
+            all_known_rooms.insert(*insert_index, new_room);
             next_diff_was_handled = true;
         }
         Some(VectorDiff::PushFront { value: new_room }) if room.room_id == new_room.room_id() => {
-            if LOG_ROOM_LIST_DIFFS {
-                println!(
-                    "Optimizing {remove_diff:?} + PushFront into Update for room {}",
-                    room.room_id
-                );
-            }
-            update_room(room, new_room, room_list_service).await?;
-            all_known_rooms.push_front(new_room.clone().into());
+            trace!(
+                "Optimizing {remove_diff:?} + PushFront into Update for room {}",
+                room.room_id
+            );
+            let new_room = RoomListServiceRoomInfo::from_room_ref(new_room.deref()).await;
+            update_room(room, &new_room, room_list_service).await?;
+            all_known_rooms.push_front(new_room);
             next_diff_was_handled = true;
         }
         Some(VectorDiff::PushBack { value: new_room }) if room.room_id == new_room.room_id() => {
-            if LOG_ROOM_LIST_DIFFS {
-                println!(
-                    "Optimizing {remove_diff:?} + PushBack into Update for room {}",
-                    room.room_id
-                );
-            }
-            update_room(room, new_room, room_list_service).await?;
-            all_known_rooms.push_back(new_room.clone().into());
+            trace!(
+                "Optimizing {remove_diff:?} + PushBack into Update for room {}",
+                room.room_id
+            );
+            let new_room = RoomListServiceRoomInfo::from_room_ref(new_room.deref()).await;
+            update_room(room, &new_room, room_list_service).await?;
+            all_known_rooms.push_back(new_room);
             next_diff_was_handled = true;
         }
         _ => next_diff_was_handled = false,
@@ -278,11 +261,9 @@ pub fn handle_sync_service_state(
 ) {
     Handle::current().spawn(async move {
         while let Some(state) = sync_service_state.next().await {
-            println!("Sync service changed state: {state:?}");
+            debug!("Sync service changed state: {state:?}");
 
-            state_updaters
-                .update_sync_service(FrontendSyncServiceState::new(state))
-                .expect("Couldn't update login frontend store");
+            let _ = state_updaters.update_sync_service(FrontendSyncServiceState::new(state));
         }
     });
 }

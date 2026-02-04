@@ -1,25 +1,26 @@
-use std::time::SystemTime;
-
-use crossbeam_queue::SegQueue;
-use matrix_sdk::{
-    Client, Room,
-    deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
-    notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode},
-    ruma::{
-        MilliSecondsSinceUnixEpoch,
-        api::client::push::{Pusher, PusherIds, PusherInit, PusherKind},
-        events::{AnyMessageLikeEventContent, AnySyncTimelineEvent, room::message::MessageType},
-        push::HttpPusherData,
-        serde::Raw,
-    },
-    sync::Notification,
-};
-use unicode_segmentation::UnicodeSegmentation;
-
+// Common imports
 use crate::{
     init::singletons::{UIUpdateMessage, broadcast_event, get_event_bridge},
-    models::events::{EmitEvent, OsNotificationRequest, ToastNotificationRequest},
+    models::events::{EmitEvent, ToastNotificationRequest},
 };
+use crossbeam_queue::SegQueue;
+use matrix_sdk::Client;
+
+// Platform imports
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use anyhow::anyhow;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use matrix_sdk::ruma::api::client::push::{Pusher, PusherIds, PusherInit, PusherKind};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use matrix_sdk::{
+    Room,
+    notification_settings::{NotificationSettings, RoomNotificationMode},
+    ruma::{MilliSecondsSinceUnixEpoch, events::AnySyncTimelineEvent, serde::Raw},
+};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use serde_json::{Map, json};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use url::Url;
 
 //
 // TOAST Notifications (in app)
@@ -32,13 +33,13 @@ static TOAST_NOTIFICATION: SegQueue<ToastNotificationRequest> = SegQueue::new();
 /// Toast notifications will be shown in the order they were enqueued.
 pub fn enqueue_toast_notification(notification: ToastNotificationRequest) {
     TOAST_NOTIFICATION.push(notification);
-    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 pub async fn process_toast_notifications() -> anyhow::Result<()> {
     if TOAST_NOTIFICATION.is_empty() {
         return Ok(());
-    };
+    }
     let event_bridge = get_event_bridge()?;
     while let Some(notif) = TOAST_NOTIFICATION.pop() {
         event_bridge.emit(EmitEvent::ToastNotification(notif));
@@ -50,80 +51,97 @@ pub async fn process_toast_notifications() -> anyhow::Result<()> {
 // OS Notifications (push notifications for mobiles)
 //
 
-pub async fn register_notifications(
+/// For user_language: The preferred language for receiving notifications (e.g. ‘en’ or ‘en-US’).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn register_mobile_push_notifications(
     client: &Client,
-    _mobile_push_config: Option<MobilePushNotificationConfig>,
-) {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    if _mobile_push_config.is_some() {
-        _register_mobile_push_notifications(&client, _mobile_push_config.unwrap()).await;
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    register_os_desktop_notifications(&client).await;
-}
-
-/// The required parameters to register Push Notifications for a mobile app.
-pub struct MobilePushNotificationConfig {
     token: String,
-    sygnal_gateway_url: String,
+    user_language: String,
+    android_sygnal_url: Url,
+    ios_sygnal_url: Url,
     app_id: String,
-}
-
-impl MobilePushNotificationConfig {
-    pub fn new(token: String, sygnal_gateway_url: String, app_id: String) -> Self {
-        Self {
-            token,
-            sygnal_gateway_url,
-            app_id,
-        }
-    }
-
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    pub fn sygnal_gateway_url(&self) -> &str {
-        &self.sygnal_gateway_url
-    }
-
-    pub fn app_id(&self) -> &str {
-        &self.app_id
-    }
-}
-
-pub async fn _register_mobile_push_notifications(
-    client: &Client,
-    config: MobilePushNotificationConfig,
-) {
-    let MobilePushNotificationConfig {
-        token,
-        sygnal_gateway_url,
-        app_id,
-    } = config;
-
-    let http_pusher = HttpPusherData::new(sygnal_gateway_url);
-
+) -> anyhow::Result<()> {
+    let http_pusher = get_http_pusher(user_language.clone(), android_sygnal_url, ios_sygnal_url);
     let pusher_ids = PusherIds::new(token, app_id);
 
+    let device_display_name = client
+        .encryption()
+        .get_own_device()
+        .await?
+        .ok_or(anyhow!("cannot get own device"))?
+        .display_name()
+        .unwrap_or("APP_NAME")
+        .to_owned();
     let pusher = PusherInit {
         ids: pusher_ids,
-        app_display_name: "Matrix Svelte Client".to_string(),
-        device_display_name: "My device".to_string(),
+        app_display_name: "MATRIX_SVELTE_CLIENT".to_string(),
+        device_display_name,
         profile_tag: None,
         kind: PusherKind::Http(http_pusher),
-        lang: "en".to_string(),
+        lang: user_language,
     };
 
     let pusher: Pusher = pusher.into();
 
-    let _ = client
-        .pusher()
-        .set(pusher)
-        .await
-        .expect("Couldn't set the notification pusher correcly");
+    client.pusher().set(pusher).await?;
+    Ok(())
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn get_http_pusher(
+    user_language: String,
+    android_sygnal_url: Url,
+    ios_sygnal_url: Url,
+) -> matrix_sdk::ruma::push::HttpPusherData {
+    // Due to Sygnal limitations (one instance cannot handle both FCM and APNS,
+    // the gateway differs on iOS and Android)
+    #[cfg(target_os = "ios")]
+    let mut http_pusher = matrix_sdk::ruma::push::HttpPusherData::new(ios_sygnal_url.to_string());
+    #[cfg(target_os = "android")]
+    let mut http_pusher =
+        matrix_sdk::ruma::push::HttpPusherData::new(android_sygnal_url.to_string());
+
+    http_pusher.format = Some(matrix_sdk::ruma::push::PushFormat::EventIdOnly);
+
+    // For iOS we define here the content of the notification.
+    // For android, it is defined server-side.
+    if cfg!(target_os = "ios") {
+        // Poor localization of the alert, to be improved
+        let title = if user_language.eq("fr") {
+            "Nouveau message"
+        } else {
+            "New message"
+        };
+        let body = if user_language.eq("fr") {
+            "Appuyez pour voir le message"
+        } else {
+            "Tap to view message"
+        };
+
+        let default_payload = json!( {
+          "aps": {
+              "mutable-content": 1,
+              "content-available": 1,
+              "alert": {
+                  "title": title,
+                  "body": body
+              }
+          }
+        });
+        let mut pusher_data = Map::new();
+        pusher_data.insert("default_payload".to_owned(), default_payload);
+        http_pusher.data = pusher_data;
+    }
+
+    http_pusher
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn register_os_desktop_notifications(client: &Client) {
+    use std::time::SystemTime;
+
+    use matrix_sdk::{ruma::MilliSecondsSinceUnixEpoch, sync::Notification};
+
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -134,6 +152,11 @@ pub async fn register_os_desktop_notifications(client: &Client) {
             move |notification: Notification, room: Room, client: Client| {
                 let server_settings = server_settings.clone();
                 async move {
+                    use matrix_sdk::{
+                        deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
+                        notification_settings::RoomNotificationMode,
+                    };
+
                     let mode = global_or_room_mode(&server_settings, &room).await;
                     if mode == RoomNotificationMode::Mute {
                         return;
@@ -143,6 +166,8 @@ pub async fn register_os_desktop_notifications(client: &Client) {
                         RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
                             match parse_full_notification(e, room, true).await {
                                 Ok((summary, body, server_ts)) => {
+                                    use crate::models::events::OsNotificationRequest;
+
                                     if server_ts < startup_ts {
                                         return;
                                     }
@@ -159,7 +184,9 @@ pub async fn register_os_desktop_notifications(client: &Client) {
                                     ));
                                 }
                                 Err(err) => {
-                                    eprintln!("Failed to extract notification data: {err}")
+                                    use tracing::warn;
+
+                                    warn!("Failed to extract notification data: {err}")
                                 }
                             }
                         }
@@ -174,10 +201,13 @@ pub async fn register_os_desktop_notifications(client: &Client) {
         .await;
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn global_or_room_mode(
     settings: &NotificationSettings,
     room: &Room,
 ) -> RoomNotificationMode {
+    use matrix_sdk::notification_settings::{IsEncrypted, IsOneToOne};
+
     let room_mode = settings
         .get_user_defined_room_notification_mode(room.room_id())
         .await;
@@ -197,19 +227,21 @@ pub async fn global_or_room_mode(
         .await
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client: &Client) -> bool {
-    if let Some(body) = body {
-        if mode == RoomNotificationMode::MentionsAndKeywordsOnly {
-            let mentioned = match client.user_id() {
-                Some(user_id) => body.contains(user_id.localpart()),
-                _ => false,
-            };
-            return !mentioned;
-        }
+    if let Some(body) = body
+        && mode == RoomNotificationMode::MentionsAndKeywordsOnly
+    {
+        let mentioned = match client.user_id() {
+            Some(user_id) => body.contains(user_id.localpart()),
+            _ => false,
+        };
+        return !mentioned;
     }
     false
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: Room,
@@ -234,12 +266,12 @@ pub async fn parse_full_notification(
         if room.is_direct().await.map_err(anyhow::Error::from)?
             && sender_name == room_name.to_string()
         {
-            sender_name.to_string()
+            sender_name.to_owned()
         } else {
             format!("{sender_name} in {room_name}")
         }
     } else {
-        sender_name.to_string()
+        sender_name.to_owned()
     };
 
     let body = if show_body {
@@ -248,16 +280,21 @@ pub async fn parse_full_notification(
         None
     };
 
-    return Ok((summary, body, server_ts));
+    Ok((summary, body, server_ts))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
+    use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
+
     let AnySyncTimelineEvent::MessageLike(event) = event else {
         return None;
     };
 
     match event.original_content()? {
         AnyMessageLikeEventContent::RoomMessage(message) => {
+            use matrix_sdk::ruma::events::room::message::MessageType;
+
             let body = match message.msgtype {
                 MessageType::Audio(_) => {
                     format!("{sender_name} sent an audio file.")
@@ -292,7 +329,10 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn truncate(s: String) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+
     static MAX_LENGTH: usize = 5000;
     if s.graphemes(true).count() > MAX_LENGTH {
         let truncated: String = s.graphemes(true).take(MAX_LENGTH).collect();

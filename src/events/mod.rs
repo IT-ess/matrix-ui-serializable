@@ -1,4 +1,4 @@
 pub(crate) mod emoji_verification;
-mod event_preview;
-pub(crate) mod events;
+pub(crate) mod event_preview;
+pub(crate) mod handlers;
 pub(crate) mod timeline;

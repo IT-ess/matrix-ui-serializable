@@ -1,25 +1,20 @@
 use anyhow::anyhow;
-use seshat::Database;
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::{path::PathBuf, sync::OnceLock};
 
-use matrix_sdk::{Client, ruma::OwnedRoomId};
+use matrix_sdk::{Client, ruma::OwnedUserId};
 use matrix_sdk_ui::sync_service::SyncService;
 use tokio::sync::{
     broadcast,
-    mpsc::{self, UnboundedSender},
+    mpsc::{Receiver, UnboundedSender},
 };
 
 use crate::{
+    init::session::ClientSession,
     models::{
         async_requests::MatrixRequest,
         event_bridge::EventBridge,
         events::{MatrixRoomStoreCreatedRequest, MatrixVerificationResponse},
     },
-    room::joined_room::JoinedRoomDetails,
 };
 
 /// The sender used by [`submit_async_request`] to send requests to the async worker thread.
@@ -29,27 +24,22 @@ pub static REQUEST_SENDER: OnceLock<UnboundedSender<MatrixRequest>> = OnceLock::
 /// The singleton sync service.
 pub static SYNC_SERVICE: OnceLock<SyncService> = OnceLock::new();
 
-pub fn _get_sync_service() -> Option<&'static SyncService> {
-    SYNC_SERVICE.get()
-}
+/// Flag set by `handle_rooms_loading_state` when all rooms are loaded.
+/// if rooms have been synced or not.
+pub static ALL_ROOMS_LOADED: OnceLock<bool> = OnceLock::new();
 
-/// Information about all joined rooms that our client currently know about.
-pub static ALL_JOINED_ROOMS: Mutex<BTreeMap<OwnedRoomId, JoinedRoomDetails>> =
-    Mutex::new(BTreeMap::new());
-
-pub static TOMBSTONED_ROOMS: Mutex<BTreeMap<OwnedRoomId, OwnedRoomId>> =
-    Mutex::new(BTreeMap::new());
-
-pub static LOG_ROOM_LIST_DIFFS: bool = true;
-
-pub static LOG_TIMELINE_DIFFS: bool = true;
+/// The temporary Client Session used during login
+pub static TEMP_CLIENT_SESSION: OnceLock<ClientSession> = OnceLock::new();
 
 /// The logged-in Matrix client, which can be freely and cheaply cloned.
 pub static CLIENT: OnceLock<Client> = OnceLock::new();
 
-pub fn get_client() -> Option<Client> {
+pub fn get_cloned_client() -> Option<Client> {
     CLIENT.get().cloned()
 }
+
+/// The current User's ID
+pub static CURRENT_USER_ID: OnceLock<OwnedUserId> = OnceLock::new();
 
 /// Flag to be set once the frontend Login Store is up and ready
 pub static LOGIN_STORE_READY: OnceLock<bool> = OnceLock::new();
@@ -94,12 +84,12 @@ pub fn init_broadcaster(capacity: usize) -> Result<(), &'static str> {
 }
 
 // Globally available function to broadcast messages
-pub fn broadcast_event(message: UIUpdateMessage) -> Result<usize, Box<dyn std::error::Error>> {
+pub fn broadcast_event(message: UIUpdateMessage) {
     let broadcaster = GLOBAL_BROADCASTER
         .get()
-        .ok_or("Broadcaster not initialized. Call init_broadcaster() first.")?;
+        .expect("Broadcaster not initialized. Call init_broadcaster() first.");
 
-    Ok(broadcaster.broadcast(message)?)
+    let _ = broadcaster.broadcast(message);
 }
 
 // Globally available function to create receivers
@@ -125,12 +115,11 @@ pub fn get_event_bridge<'a>() -> anyhow::Result<&'a EventBridge> {
 // Adapter -> lib communication
 
 pub static ROOM_CREATED_RECEIVER: OnceLock<
-    tokio::sync::Mutex<mpsc::Receiver<MatrixRoomStoreCreatedRequest>>,
+    tokio::sync::Mutex<Receiver<MatrixRoomStoreCreatedRequest>>,
 > = OnceLock::new();
 
-pub async fn get_room_created_receiver_lock<'a>() -> anyhow::Result<
-    tokio::sync::MutexGuard<'a, tokio::sync::mpsc::Receiver<MatrixRoomStoreCreatedRequest>>,
-> {
+pub async fn get_room_created_receiver_lock<'a>()
+-> anyhow::Result<tokio::sync::MutexGuard<'a, Receiver<MatrixRoomStoreCreatedRequest>>> {
     let recv = ROOM_CREATED_RECEIVER
         .get()
         .ok_or(anyhow!("The room created receiver is not yet set"))?;
@@ -138,22 +127,13 @@ pub async fn get_room_created_receiver_lock<'a>() -> anyhow::Result<
 }
 
 pub static VERIFICATION_RESPONSE_RECEIVER: OnceLock<
-    tokio::sync::Mutex<mpsc::Receiver<MatrixVerificationResponse>>,
+    tokio::sync::Mutex<Receiver<MatrixVerificationResponse>>,
 > = OnceLock::new();
 
-pub async fn get_verification_response_receiver_lock<'a>() -> anyhow::Result<
-    tokio::sync::MutexGuard<'a, tokio::sync::mpsc::Receiver<MatrixVerificationResponse>>,
-> {
+pub async fn get_verification_response_receiver_lock<'a>()
+-> anyhow::Result<tokio::sync::MutexGuard<'a, Receiver<MatrixVerificationResponse>>> {
     let recv = VERIFICATION_RESPONSE_RECEIVER
         .get()
         .ok_or(anyhow!("The verification response receiver is not yet set"))?;
     Ok(recv.lock().await)
-}
-
-// Seshat
-
-pub static SESHAT_DATABASE: OnceLock<Arc<Mutex<Database>>> = OnceLock::new();
-
-pub fn get_seshat_db_lock() -> Option<Arc<Mutex<Database>>> {
-    SESHAT_DATABASE.get().cloned()
 }

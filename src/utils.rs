@@ -1,14 +1,13 @@
 use std::borrow::Cow;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, sleep};
+use tracing::warn;
 
-use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
+use matrix_sdk::ruma::{OwnedRoomId, RoomId};
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
 use crate::models::async_requests::{MatrixRequest, submit_async_request};
 use crate::models::events::DeviceGuessedType;
-
-use super::init::singletons::CLIENT;
 
 /// Returns the sender's display name if available.
 ///
@@ -22,13 +21,13 @@ pub fn get_or_fetch_event_sender(
     let sender_username = match event_tl_item.sender_profile() {
         TimelineDetails::Ready(profile) => profile.display_name.as_deref(),
         TimelineDetails::Unavailable => {
-            if let Some(room_id) = room_id {
-                if let Some(event_id) = event_tl_item.event_id() {
-                    submit_async_request(MatrixRequest::FetchDetailsForEvent {
-                        room_id: room_id.clone(),
-                        event_id: event_id.to_owned(),
-                    });
-                }
+            if let Some(room_id) = room_id
+                && let Some(event_id) = event_tl_item.event_id()
+            {
+                submit_async_request(MatrixRequest::FetchDetailsForEvent {
+                    room_id: room_id.clone(),
+                    event_id: event_id.to_owned(),
+                });
             }
             None
         }
@@ -36,13 +35,6 @@ pub fn get_or_fetch_event_sender(
     }
     .unwrap_or_else(|| event_tl_item.sender().as_str());
     sender_username.to_owned()
-}
-
-/// Returns the user ID of the currently logged-in user, if any.
-pub fn current_user_id() -> Option<OwnedUserId> {
-    CLIENT
-        .get()
-        .and_then(|c| c.session_meta().map(|m| m.user_id.clone()))
 }
 
 /// Removes leading whitespace and HTML whitespace tags (`<p>` and `<br>`) from the given `text`.
@@ -187,7 +179,7 @@ pub fn debounce_broadcast<T: Clone + Send + 'static>(
                         Ok(item) => last_item = Some(item),
                         Err(broadcast::error::RecvError::Closed) => break,
                         Err(broadcast::error::RecvError::Lagged(i)) => {
-                            eprintln!("Broadcast receiver missed {i} updates");
+                            warn!("Broadcast receiver missed {i} updates");
                             // Handle lagged receiver - you might want to log this
                             // The receiver was too slow and missed some messages
                             continue;
@@ -196,10 +188,8 @@ pub fn debounce_broadcast<T: Clone + Send + 'static>(
                 }
 
                 _ = sleep(duration), if last_item.is_some() => {
-                    if let Some(item) = last_item.take() {
-                        if tx.send(item).await.is_err() {
+                    if let Some(item) = last_item.take() && tx.send(item).await.is_err() {
                             break; // Receiver dropped
-                        }
                     }
                 }
             }
@@ -210,10 +200,10 @@ pub fn debounce_broadcast<T: Clone + Send + 'static>(
 }
 
 pub(crate) fn guess_device_type(display_name: Option<&str>) -> DeviceGuessedType {
-    if display_name.is_none() {
+    let Some(display_name) = display_name else {
         return DeviceGuessedType::Unknown;
     };
-    let display_lower = display_name.unwrap().to_lowercase();
+    let display_lower = display_name.to_lowercase();
 
     if display_lower.contains("ios")
         || display_lower.contains("iphone")

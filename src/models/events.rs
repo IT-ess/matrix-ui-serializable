@@ -7,6 +7,8 @@ pub enum ListenEvent {
     RoomCreated,
     VerificationResult,
     MatrixUpdateCurrentActiveRoom,
+    MatrixLogin,
+    CancelVerification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,9 +27,18 @@ pub struct MatrixRoomStoreCreatedRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatrixUpdateCurrentActiveRoom {
-    // if the frontend sends null then it will be None
-    pub room_id: Option<OwnedRoomId>,
-    pub room_name: Option<String>,
+    pub room_id: OwnedRoomId,
+    pub room_name: String,
+}
+
+/// The user's account credentials to create a new Matrix session
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixLoginPayload {
+    pub username: String,
+    pub password: String,
+    pub homeserver_url: String,
+    pub client_name: String,
 }
 
 // Emit events
@@ -38,6 +49,9 @@ pub enum EmitEvent {
     VerificationStart(MatrixVerificationEmojis),
     ToastNotification(ToastNotificationRequest),
     OsNotification(OsNotificationRequest),
+    OAuthUrl(String),
+    ResetCrossSigngingUrl(String),
+    NewlyCreatedRoomId(OwnedRoomId),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,6 +157,19 @@ pub enum MediaStreamEvent {
     },
 }
 
+#[derive(Clone, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "event",
+    content = "data"
+)]
+pub enum VerifyDeviceEvent {
+    Requested,
+    Done,
+    Cancelled { reason: String },
+}
+
 // Commands
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,7 +178,7 @@ pub struct FrontendDevice {
     pub is_verified: bool,
     pub is_verified_with_cross_signing: bool,
     pub display_name: Option<String>,
-    pub registration_date: MilliSecondsSinceUnixEpoch,
+    pub last_seen_ts: Option<MilliSecondsSinceUnixEpoch>,
     pub guessed_type: DeviceGuessedType,
     pub is_current_device: bool,
 }

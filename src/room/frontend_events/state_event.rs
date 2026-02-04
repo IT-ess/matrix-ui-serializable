@@ -1,6 +1,11 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use matrix_sdk::ruma::OwnedMxcUri;
+use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::events::FullStateEventContent;
+use matrix_sdk::ruma::events::RedactContent;
+use matrix_sdk::ruma::events::StaticStateEventContent;
 use matrix_sdk::ruma::events::policy::rule::room::PolicyRuleRoomEventContent;
 use matrix_sdk::ruma::events::policy::rule::server::PolicyRuleServerEventContent;
 use matrix_sdk::ruma::events::policy::rule::user::PolicyRuleUserEventContent;
@@ -23,11 +28,6 @@ use matrix_sdk::ruma::events::room::tombstone::RoomTombstoneEventContent;
 use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::space::parent::SpaceParentEventContent;
-use matrix_sdk::ruma::events::FullStateEventContent;
-use matrix_sdk::ruma::events::RedactContent;
-use matrix_sdk::ruma::events::StaticStateEventContent;
-use matrix_sdk::ruma::OwnedMxcUri;
-use matrix_sdk::ruma::UserId;
 use matrix_sdk_ui::timeline::AnyOtherFullStateEventContent;
 use matrix_sdk_ui::timeline::MemberProfileChange;
 use matrix_sdk_ui::timeline::MembershipChange;

@@ -8,24 +8,22 @@ use futures::StreamExt;
 use matrix_sdk::{
     Room,
     room::RoomMember,
-    ruma::{
-        OwnedEventId, OwnedRoomId,
-        events::{FullStateEventContent, receipt::Receipt},
-    },
+    ruma::{OwnedEventId, OwnedRoomId, events::receipt::Receipt},
 };
 use matrix_sdk_ui::{
     Timeline,
     eyeball_im::{Vector, VectorDiff},
     timeline::{
-        self, AnyOtherFullStateEventContent, EventTimelineItem, MembershipChange,
-        TimelineEventItemId, TimelineItem, TimelineItemContent,
+        self, LatestEventValue, RoomExt, TimelineDetails, TimelineEventItemId, TimelineItem,
     },
 };
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use tokio::sync::watch;
+use tracing::{debug, error, trace};
 
 use crate::{
-    init::singletons::{ALL_JOINED_ROOMS, LOG_TIMELINE_DIFFS, UIUpdateMessage, broadcast_event},
+    events::event_preview::text_preview_of_timeline_item,
+    init::singletons::{CLIENT, UIUpdateMessage, broadcast_event},
     models::async_requests::{MatrixRequest, submit_async_request},
     room::{
         frontend_events::events_dto::{FrontendTimelineItem, to_frontend_timeline_item},
@@ -33,10 +31,7 @@ use crate::{
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
     user::user_power_level::UserPowerLevels,
-    utils::current_user_id,
 };
-
-use super::events::get_latest_event_details;
 
 /// Which direction to paginate in.
 ///
@@ -122,12 +117,12 @@ pub enum TimelineUpdate {
     /// including a `result` that indicates whether the request was successful.
     EventDetailsFetched {
         event_id: OwnedEventId,
-        result: Result<(), matrix_sdk_ui::timeline::Error>,
+        result: Result<(), timeline::Error>,
     },
     /// The result of a request to edit a message in this timeline.
     MessageEdited {
         timeline_event_id: TimelineEventItemId,
-        result: Result<(), matrix_sdk_ui::timeline::Error>,
+        result: Result<(), timeline::Error>,
     },
     /// A notice that the room's members have been fetched from the server,
     /// though the success or failure of the request is not yet known until the client
@@ -168,6 +163,7 @@ pub struct TimelineUiState {
     pub(crate) room_id: OwnedRoomId,
 
     /// The power levels of the currently logged-in user in this room.
+    // The TS type corresponds to how power levels are serialized in frontend.
     pub(crate) user_power: UserPowerLevels,
 
     /// Whether this room's timeline has been fully paginated, which means
@@ -227,11 +223,11 @@ impl Serialize for TimelineUiState {
         state.end()
     }
 }
-fn serialize_timeline_items<'a>(
-    items: &'a Vector<Arc<TimelineItem>>,
+fn serialize_timeline_items(
+    items: &Vector<Arc<TimelineItem>>,
     room_id: &OwnedRoomId,
     user_power_levels: &UserPowerLevels,
-) -> Vec<FrontendTimelineItem<'a>> {
+) -> Vec<FrontendTimelineItem> {
     items
         .iter()
         .map(|item| to_frontend_timeline_item(item, Some(room_id), user_power_levels))
@@ -252,17 +248,18 @@ pub fn take_timeline_endpoints(
     crossbeam_channel::Receiver<TimelineUpdate>,
     TimelineRequestSender,
 )> {
-    ALL_JOINED_ROOMS
-        .lock()
-        .unwrap()
-        .get_mut(room_id)
-        .and_then(|ri| {
-            ri.timeline_singleton_endpoints
-                .take()
-                .map(|(receiver, request_sender)| {
-                    (ri.timeline_update_sender.clone(), receiver, request_sender)
-                })
-        })
+    crate::room::joined_room::try_get_room_details(room_id).and_then(|ri| {
+        let mut lock = ri.lock().unwrap();
+        lock.timeline_singleton_endpoints
+            .take()
+            .map(|(receiver, request_sender)| {
+                (
+                    lock.timeline_update_sender.clone(),
+                    receiver,
+                    request_sender,
+                )
+            })
+    })
 }
 
 /// A per-room async task that listens for timeline updates and sends them to the UI thread.
@@ -298,9 +295,9 @@ pub async fn timeline_subscriber_handler(
     }
 
     let room_id = room.room_id().to_owned();
-    println!("Starting timeline subscriber for room {room_id}...");
+    debug!("Starting timeline subscriber for room {room_id}...");
     let (mut timeline_items, mut subscriber) = timeline.subscribe().await;
-    println!(
+    debug!(
         "Received initial timeline update of {} items for room {room_id}.",
         timeline_items.len()
     );
@@ -310,8 +307,6 @@ pub async fn timeline_subscriber_handler(
     }).unwrap_or_else(
         |_e| panic!("Error: timeline update sender couldn't send first update ({} items) to room {room_id}!", timeline_items.len())
     );
-
-    let mut latest_event = timeline.latest_event().await;
 
     // the event ID to search for while loading previous items into the timeline.
     let mut target_event_id = None;
@@ -337,8 +332,7 @@ pub async fn timeline_subscriber_handler(
                 target_event_id = new_request_details.as_ref().map(|(ev, ..)| ev.clone());
 
                 // If we received a new request, start searching backwards for the target event.
-                if let Some((new_target_event_id, starting_index, current_tl_len)) = new_request_details {
-                    if prev_target_event_id.as_ref() != Some(&new_target_event_id) {
+                if let Some((new_target_event_id, starting_index, current_tl_len)) = new_request_details && prev_target_event_id.as_ref() != Some(&new_target_event_id) {
                         let starting_index = if current_tl_len == timeline_items.len() {
                             starting_index
                         } else {
@@ -346,7 +340,7 @@ pub async fn timeline_subscriber_handler(
                             // Instead, we have no choice but to start from the end of the timeline.
                             timeline_items.len()
                         };
-                        // println!("Received new request to search for event {new_target_event_id} in room {room_id} starting from index {starting_index} (tl len {}).", timeline_items.len());
+                        debug!("Received new request to search for event {new_target_event_id} in room {room_id} starting from index {starting_index} (tl len {}).", timeline_items.len());
                         // Search backwards for the target event in the timeline, starting from the given index.
                         if let Some(target_event_tl_index) = timeline_items
                             .focus()
@@ -359,7 +353,7 @@ pub async fn timeline_subscriber_handler(
                             )
                             .map(|i| starting_index.saturating_sub(i).saturating_sub(1))
                         {
-                            // println!("Found existing target event {new_target_event_id} in room {room_id} at index {target_event_tl_index}.");
+                            debug!("Found existing target event {new_target_event_id} in room {room_id} at index {target_event_tl_index}.");
 
                             // Nice! We found the target event in the current timeline items,
                             // so there's no need to actually proceed with backwards pagination;
@@ -375,10 +369,10 @@ pub async fn timeline_subscriber_handler(
                                 |_e| panic!("Error: timeline update sender couldn't send TargetEventFound({new_target_event_id}, {target_event_tl_index}) to room {room_id}!")
                             );
                             // Update this room's timeline UI view.
-                            broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                            broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         else {
-                            // println!("Target event not in timeline. Starting backwards pagination in room {room_id} to find target event {new_target_event_id} starting from index {starting_index}.");
+                            debug!("Target event not in timeline. Starting backwards pagination in room {room_id} to find target event {new_target_event_id} starting from index {starting_index}.");
 
                             // If we didn't find the target event in the current timeline items,
                             // we need to start loading previous items into the timeline.
@@ -388,7 +382,6 @@ pub async fn timeline_subscriber_handler(
                                 direction: PaginationDirection::Backwards,
                             });
                         }
-                    }
                 }
             }
 
@@ -397,7 +390,6 @@ pub async fn timeline_subscriber_handler(
                 let Some(batch) = batch_opt else { break };
                 let mut num_updates = 0;
                 // For now we always requery the latest event, but this can be better optimized.
-                let mut reobtain_latest_event = true;
                 let mut index_of_first_change = usize::MAX;
                 let mut index_of_last_change = usize::MIN;
                 // whether to clear the entire cache of drawn items
@@ -412,18 +404,16 @@ pub async fn timeline_subscriber_handler(
                             index_of_first_change = min(index_of_first_change, timeline_items.len());
                             timeline_items.extend(values);
                             index_of_last_change = max(index_of_last_change, timeline_items.len());
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Append {_values_len}. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                             trace!("timeline_subscriber: room {room_id} diff Append {_values_len}. Changes: {index_of_first_change}..{index_of_last_change}");
                             is_append = true;
                         }
                         VectorDiff::Clear => {
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Clear"); }
+                             trace!("timeline_subscriber: room {room_id} diff Clear");
                             clear_cache = true;
                             timeline_items.clear();
-                            reobtain_latest_event = true;
                         }
                         VectorDiff::PushFront { value } => {
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff PushFront"); }
+                            trace!("timeline_subscriber: room {room_id} diff PushFront");
                             if let Some((index, _ev)) = found_target_event_id.as_mut() {
                                 *index += 1; // account for this new `value` being prepended.
                             } else {
@@ -432,18 +422,16 @@ pub async fn timeline_subscriber_handler(
 
                             clear_cache = true;
                             timeline_items.push_front(value);
-                            reobtain_latest_event |= latest_event.is_none();
                         }
                         VectorDiff::PushBack { value } => {
                             index_of_first_change = min(index_of_first_change, timeline_items.len());
                             timeline_items.push_back(value);
                             index_of_last_change = max(index_of_last_change, timeline_items.len());
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff PushBack. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff PushBack. Changes: {index_of_first_change}..{index_of_last_change}");
                             is_append = true;
                         }
                         VectorDiff::PopFront => {
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff PopFront"); }
+                            trace!("timeline_subscriber: room {room_id} diff PopFront");
                             clear_cache = true;
                             timeline_items.pop_front();
                             if let Some((i, _ev)) = found_target_event_id.as_mut() {
@@ -455,8 +443,7 @@ pub async fn timeline_subscriber_handler(
                             timeline_items.pop_back();
                             index_of_first_change = min(index_of_first_change, timeline_items.len());
                             index_of_last_change = usize::MAX;
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff PopBack. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff PopBack. Changes: {index_of_first_change}..{index_of_last_change}");
                         }
                         VectorDiff::Insert { index, value } => {
                             if index == 0 {
@@ -480,15 +467,13 @@ pub async fn timeline_subscriber_handler(
                             }
 
                             timeline_items.insert(index, value);
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Insert at {index}. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff Insert at {index}. Changes: {index_of_first_change}..{index_of_last_change}");
                         }
                         VectorDiff::Set { index, value } => {
                             index_of_first_change = min(index_of_first_change, index);
                             index_of_last_change  = max(index_of_last_change, index.saturating_add(1));
                             timeline_items.set(index, value);
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Set at {index}. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff Set at {index}. Changes: {index_of_first_change}..{index_of_last_change}");
                         }
                         VectorDiff::Remove { index } => {
                             if index == 0 {
@@ -504,8 +489,7 @@ pub async fn timeline_subscriber_handler(
                                 }
                             }
                             timeline_items.remove(index);
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Remove at {index}. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff Remove at {index}. Changes: {index_of_first_change}..{index_of_last_change}");
                         }
                         VectorDiff::Truncate { length } => {
                             if length == 0 {
@@ -515,31 +499,28 @@ pub async fn timeline_subscriber_handler(
                                 index_of_last_change = usize::MAX;
                             }
                             timeline_items.truncate(length);
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Truncate to length {length}. Changes: {index_of_first_change}..{index_of_last_change}"); }
-                            reobtain_latest_event = true;
+                            trace!("timeline_subscriber: room {room_id} diff Truncate to length {length}. Changes: {index_of_first_change}..{index_of_last_change}");
                         }
                         VectorDiff::Reset { values } => {
-                            if LOG_TIMELINE_DIFFS { println!("timeline_subscriber: room {room_id} diff Reset, new length {}", values.len()); }
+                            trace!("timeline_subscriber: room {room_id} diff Reset, new length {}", values.len());
                             clear_cache = true; // we must assume all items have changed.
                             timeline_items = values;
-                            reobtain_latest_event = true;
                         }
                     }
                 }
 
 
                 if num_updates > 0 {
-                    let new_latest_event = if reobtain_latest_event {
-                        timeline.latest_event().await
-                    } else {
-                        None
-                    };
-
-                    let changed_indices = index_of_first_change..index_of_last_change;
-
-                    if LOG_TIMELINE_DIFFS {
-                        println!("timeline_subscriber: applied {num_updates} updates for room {room_id}, timeline now has {} items. is_append? {is_append}, clear_cache? {clear_cache}. Changes: {changed_indices:?}.", timeline_items.len());
+                    // Handle the case where back pagination inserts items at the beginning of the timeline
+                    // (meaning the entire timeline needs to be re-drawn),
+                    // but there is a virtual event at index 0 (e.g., a day divider).
+                    // When that happens, we want the RoomScreen to treat this as if *all* events changed.
+                    if index_of_first_change == 1 && timeline_items.front().and_then(|item| item.as_virtual()).is_some() {
+                        index_of_first_change = 0;
+                        clear_cache = true;
                     }
+                    let changed_indices = index_of_first_change..index_of_last_change;
+                    debug!("timeline_subscriber: applied {num_updates} updates for room {room_id}, timeline now has {} items. is_append? {is_append}, clear_cache? {clear_cache}. Changes: {changed_indices:?}.", timeline_items.len());
                     timeline_update_sender.send(TimelineUpdate::NewItems {
                         new_items: timeline_items.clone(),
                         clear_cache,
@@ -559,21 +540,9 @@ pub async fn timeline_subscriber_handler(
                         );
                     }
 
-                    // Update the latest event for this room.
-                    // We always do this in case a redaction or other event has changed the latest event.
-                    if let Some(new_latest) = new_latest_event {
-                        let room_avatar_changed = update_latest_event(room_id.clone(), &new_latest, Some(&timeline_update_sender));
-                        if room_avatar_changed & room.avatar_url().is_some() {
-                            enqueue_rooms_list_update(RoomsListUpdate::UpdateRoomAvatar {
-                                room_id: room_id.clone(),
-                                avatar: room.avatar_url().unwrap(),
-                            });
-                        }
-                        latest_event = Some(new_latest);
-                    }
 
                     // Update this room's timeline UI view.
-                    broadcast_event(UIUpdateMessage::RefreshUI).expect("Couldn't broadcast event to UI");
+                    broadcast_event(UIUpdateMessage::RefreshUI);
                 }
             }
 
@@ -583,97 +552,66 @@ pub async fn timeline_subscriber_handler(
         }
     }
 
-    eprintln!("Error: unexpectedly ended timeline subscriber for room {room_id}.");
+    error!("Error: unexpectedly ended timeline subscriber for room {room_id}.");
 }
 
 /// Handles the given updated latest event for the given room.
 ///
-/// This currently includes checking the given event for:
-/// * room name changes, in which it sends a `RoomsListUpdate`.
-/// * room power level changes to see if the current user's permissions
-///   have changed; if so, it sends a [`TimelineUpdate::UserPowerLevels`].
-/// * room avatar changes, which is not handled here.
-///   Instead, we return `true` such that other code can fetch the new avatar.
-/// * membership changes to see if the current user has joined or left a room.
-///
-/// Finally, this function sends a `RoomsListUpdate::UpdateLatestEvent`
-/// to update the latest event in the RoomsList's room preview for the given room.
-///
-/// Returns `true` if room avatar has changed and should be fetched and updated.
-pub fn update_latest_event(
-    room_id: OwnedRoomId,
-    event_tl_item: &EventTimelineItem,
-    timeline_update_sender: Option<&crossbeam_channel::Sender<TimelineUpdate>>,
-) -> bool {
-    let mut room_avatar_changed = false;
+/// This function sends a `RoomsListUpdate::UpdateLatestEvent`
+/// to update the latest event in the RoomsListEntry for the given room.
+pub async fn update_latest_event(room: &Room) {
+    let client = CLIENT.wait();
+    let (sender_username, _sender_id, timestamp, content) = match room.latest_event().await {
+        LatestEventValue::Remote {
+            timestamp,
+            sender,
+            is_own,
+            profile,
+            content,
+        } => {
+            let sender_username = if let TimelineDetails::Ready(profile) = profile {
+                profile.display_name
+            } else if is_own {
+                client.account().get_display_name().await.ok().flatten()
+            } else {
+                None
+            };
+            (
+                sender_username.unwrap_or_else(|| sender.to_string()),
+                sender,
+                timestamp,
+                content,
+            )
+        }
+        LatestEventValue::Local {
+            timestamp,
+            content,
+            sender,
+            profile,
+            state: _,
+        } => {
+            // TODO: use the `is_sending` flag to augment the preview text
+            //       (e.g., "Sending... <msg>" or "Failed to send <msg>").
+            let our_name = match profile {
+                TimelineDetails::Ready(p) => p.display_name,
+                _ => client.account().get_display_name().await.ok().flatten(),
+            };
+            (
+                our_name.unwrap_or_else(|| String::from("You")),
+                sender,
+                timestamp,
+                content,
+            )
+        }
+        LatestEventValue::None => return,
+    };
 
-    let (timestamp, latest_message_text) = get_latest_event_details(event_tl_item, &room_id);
-    match event_tl_item.content() {
-        // Check for relevant state events.
-        TimelineItemContent::OtherState(other) => {
-            match other.content() {
-                // Check for room name changes.
-                AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Original {
-                    content,
-                    ..
-                }) => {
-                    enqueue_rooms_list_update(RoomsListUpdate::UpdateRoomName {
-                        room_id: room_id.clone(),
-                        new_room_name: matrix_sdk::RoomDisplayName::Named(content.name.clone()),
-                    });
-                }
-                // Check for room avatar changes.
-                AnyOtherFullStateEventContent::RoomAvatar(_avatar_event) => {
-                    room_avatar_changed = true;
-                }
-                // Check for if can user send message.
-                AnyOtherFullStateEventContent::RoomPowerLevels(
-                    FullStateEventContent::Original {
-                        content,
-                        prev_content: _,
-                    },
-                ) => {
-                    if let (Some(sender), Some(user_id)) =
-                        (timeline_update_sender, current_user_id())
-                    {
-                        match sender.send(TimelineUpdate::UserPowerLevels(UserPowerLevels::from(
-                            &content.clone(),
-                            &user_id,
-                        ))) {
-                            Ok(_) => {
-                                broadcast_event(UIUpdateMessage::RefreshUI)
-                                    .expect("Couldn't broadcast event to UI");
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "Failed to send the new RoomPowerLevels from an updated latest event: {e}"
-                                );
-                            }
-                        }
-                    }
-                }
-                _ => {} // TODO: implement behaviour
-            }
-        }
-        TimelineItemContent::MembershipChange(room_membership_change) => {
-            if matches!(
-                room_membership_change.change(),
-                Some(MembershipChange::InvitationAccepted | MembershipChange::Joined)
-            ) {
-                if current_user_id().as_deref() == Some(room_membership_change.user_id()) {
-                    submit_async_request(MatrixRequest::GetRoomPowerLevels {
-                        room_id: room_id.clone(),
-                    });
-                }
-            }
-        }
-        _ => {} // TODO: implement behaviour
-    }
+    let latest_message_text = text_preview_of_timeline_item(&content, &sender_username)
+        .format_with(&sender_username, true);
 
     enqueue_rooms_list_update(RoomsListUpdate::UpdateLatestEvent {
-        room_id,
+        room_id: room.room_id().to_owned(),
         timestamp,
         latest_message_text,
     });
-    room_avatar_changed
 }

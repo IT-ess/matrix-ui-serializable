@@ -1,24 +1,27 @@
 # matrix-ui-serializable
 
-This library creates an even higher abstraction of a Matrix client than [matrix_sdk_ui](https://docs.rs/matrix-sdk-ui/) does, by exposing high-level serializable components states (a Matrix room for instance).
+This library creates an even higher level abstraction of a Matrix client than [matrix_sdk_ui](https://docs.rs/matrix-sdk-ui/) does, by exposing serializable structs representing the RoomsList and Rooms.
+This lib is then used by adapters like [tauri-plugin-matrix-svelte](https://github.com/IT-ess/tauri-plugin-matrix-svelte) to bridge the serialized structs to a frontend of your choice. 
 
 # Features
 
-This lib is mostly a port of [Robrix](https://github.com/project-robius/robrix) backend, with few adaptations. The current main features are :
+This lib is mostly a port of some great bits from [Robrix](https://github.com/project-robius/robrix), with few adaptations. The main Matrix related features supported are :
 
-- Basics (login, sync, room list, creating a room, room actions, basic message like structs)
-- 🔥 High level serializable states. For instance, each room has its own serializable state (which includes its timeline). These states can then be translated to the frontend into native reactive stores for better integration.
-- Client emoji verification of user's devices (outgoing or incoming)
-- OS & Mobile Push notifications
+- Basics (login, sync, room list, creating rooms, text messages)
+- Sending and receiving media or audio messages
+- Replying to, reacting, editing, or redacting a message
+- Basic threads support
+- Device verification and recovery
+- OS & Mobile Push notifications (requires a [Sygnal](https://github.com/element-hq/sygnal) gateway)
 
-For a full implementation example of this lib in a client, see [matrix-svelte-client](https://github.com/IT-ess/tauri-plugin-matrix-svelte/tree/main/example/matrix-svelte-client).
+**These features are showcased in the example [matrix-svelte-client](https://github.com/IT-ess/tauri-plugin-matrix-svelte/tree/main/example/matrix-svelte-client)**.
 
 
 # Architecture
 
 The goal of this lib is to provide an even higher abstraction than matrix-sdk-ui does. Mostly, it abstracts each piece of the frontend state in a reactive serializable store.
 
-**This lib is intended to be frontend agnostic**, and must be used with an "adapter" (such as [tauri-plugin-matrix-svelte](https://github.com/IT-ess/tauri-plugin-matrix-svelte)) that acts as a translation layer between the Rust state, and the frontend state. WASM and UniFFI bindings are yet not supported but they might be in the future.
+**This lib is intended to be frontend agnostic**, and must be used with an "adapter" (such as [tauri-plugin-matrix-svelte](https://github.com/IT-ess/tauri-plugin-matrix-svelte)). The adapter must implement some functions that will serialize the new state, pass events, or expose commands.
 
 Thus, this lib follows more or less the MVVM architectural pattern, this lib + adapter being the Model & Viewmodel, and your frontend the View.
 
@@ -33,7 +36,7 @@ Whenever the state of an abstracted object (a Matrix room for instance), the bac
 
 ## Commands
 
-Actions that return a response when invoked. These commands must be imported from the `commands` module and exposed to your frontend. At least the `login_and_create_new_session` must be exposed to log in. More details about commands [here](https://docs.rs/matrix-ui-serializable/latest/matrix_ui_serializable/commands/index.html).
+Actions that return a response when invoked. These commands must be imported from the `commands` module and exposed to your frontend. Not all commands should be implemented, but some are required if you want to login for instance. More details about commands [here](https://docs.rs/matrix-ui-serializable/latest/matrix_ui_serializable/commands/index.html).
 
 ## Events
 
@@ -54,16 +57,30 @@ The lib init is handled by a single `init` function that accepts a `LibConfig` s
 ### Session option
 
 To be OS agnostic, the session storage (and encryption) must be handled by the adapter.
-Thus if an existing session is found, pass it to the lib, and the matrix client will be restored automatically. If not, pass `None`, and handle login with the `login_and_create_new_session` command.
+Thus if an existing session is found, pass it to the lib, and the matrix client will be restored automatically. If not, pass `None`, and handle login with the login commands.
 
-### Mobile Push Config
+### App data directory
 
-If your client is a mobile iOS or Android app, the lib supports registering to mobile push notifications (APNS or FCM). You only need to provide your app identifier, the [sygnal push gateway](https://github.com/matrix-org/sygnal) url and the push token. Otherwise, pass none.
+The Matrix DB and app files will be stored there. Just provide a `PathBuf` to this dir.
 
-### Temporary directory
+### Oauth client variables
 
-Downloaded files are written to the temporary dir of the app. Just provide a `PathBuf` to this dir.
+`oauth_client_uri` and `oauth_redirect_uri` that will be used in case of an OAuth login flow.
+
+# Contributing
+This project is opened to all kinds of contributions. I'm aware that the [documentation](https://docs.rs/matrix-ui-serializable) isn't exhaustive and I do not have enough time to make it so. I can still [answer some questions](#chat-about-this-project) if needed !
+
+# Possible improvements
+
+The approach of this wrapper is quite simple, we make things serializable and we call the frontend updaters every time needed. Obviously, there is some room for performance improvements, since serialization costs a lot.
+However, the consumers of this lib still have the choice not to serialize the crates on each change, since they only have to implement a callback with the updated Rust structs (not yet serialized).
+The serialization feature of the RoomsList and RoomScreen could then be feature flagged, depending on the update method of the adapter. 
+
+# Chat about this project
+
+Join this [Matrix room](https://matrix.to/#/#matrix-ui-serializable:matrix.org) if you have questions about this project !
 
 # Credits
 
 Huge thanks to [Kevin Boos](https://github.com/kevinaboos) and the [Robius project](https://github.com/project-robius) team for their awesome work on the [Robrix](https://github.com/project-robius/robrix) client that inspired me for this different implementation.
+Also, shoutout to the Element and Matrix.org team for the wonderful and *blazingly fast* matrix-rust-sdk.

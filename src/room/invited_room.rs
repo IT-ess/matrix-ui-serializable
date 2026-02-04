@@ -3,13 +3,15 @@ use matrix_sdk::ruma::{
 };
 use serde::Serialize;
 
+use crate::models::room_display_name::FrontendRoomDisplayName;
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InvitedRoomInfo {
     /// The matrix ID of this room.
     pub room_id: OwnedRoomId,
     /// The displayable name of this room, if known.
-    pub room_name: Option<String>,
+    pub room_name: FrontendRoomDisplayName,
     /// The canonical alias for this room, if any.
     pub canonical_alias: Option<OwnedRoomAliasId>,
     /// The alternative aliases for this room, if any.
@@ -30,6 +32,7 @@ pub struct InvitedRoomInfo {
 
 /// Info about the user who invited us to a room.
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InviterInfo {
     pub user_id: OwnedUserId,
     pub display_name: Option<String>,
