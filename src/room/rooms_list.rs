@@ -758,12 +758,14 @@ impl RoomsList {
         &self,
         sort_fn: Option<&SortFn>,
     ) -> (Vec<OwnedRoomId>, Vec<OwnedRoomId>) {
-        let new_displayed_regular_rooms = Vec::new();
+        let mut new_displayed_regular_rooms = Vec::new();
         let mut new_displayed_direct_rooms = Vec::new();
         let mut push_room = |room_id: &OwnedRoomId, jr: &JoinedRoomInfo| {
             let room_id = room_id.clone();
             if jr.is_direct {
                 new_displayed_direct_rooms.push(room_id);
+            } else {
+                new_displayed_regular_rooms.push(room_id);
             }
         };
 
