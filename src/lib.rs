@@ -134,7 +134,7 @@ impl LibConfig {
 
 /// Function to be called once your app is starting to init this lib.
 /// This will start the workers and return a `Receiver` to forward outgoing events.
-pub async fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
+pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     APP_DATA_DIR
         .set(config.app_data_dir)
         .expect("Couldn't set app data dir");
@@ -145,37 +145,41 @@ pub async fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         .set(event_bridge)
         .expect("Couldn't set the event bridge");
 
-    // Adapter -> lib events
-    ROOM_CREATED_RECEIVER
-        .set(tokio::sync::Mutex::new(
-            config.event_receivers.room_created_receiver,
-        ))
-        .expect("Couldn't set room created receiver");
+    let basic_init_handle = Handle::current().spawn(async move {
+        // Adapter -> lib events
+        ROOM_CREATED_RECEIVER
+            .set(tokio::sync::Mutex::new(
+                config.event_receivers.room_created_receiver,
+            ))
+            .expect("Couldn't set room created receiver");
 
-    VERIFICATION_RESPONSE_RECEIVER
-        .set(tokio::sync::Mutex::new(
-            config.event_receivers.verification_response_receiver,
-        ))
-        .expect("Couldn't set the verification response receiver");
+        VERIFICATION_RESPONSE_RECEIVER
+            .set(tokio::sync::Mutex::new(
+                config.event_receivers.verification_response_receiver,
+            ))
+            .expect("Couldn't set the verification response receiver");
 
-    // Create a channel to be used between UI thread(s) and the async worker thread.
-    init::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster"); // TODO: adapt capacity if needed
+        // Create a channel to be used between UI thread(s) and the async worker thread.
+        init::singletons::init_broadcaster(16).expect("Couldn't init the UI broadcaster");
 
-    let (sender, receiver) = unbounded_channel::<MatrixRequest>();
-    REQUEST_SENDER
-        .set(sender)
-        .expect("BUG: REQUEST_SENDER already set!");
+        let (matrix_request_sender, matrix_request_receiver) = unbounded_channel::<MatrixRequest>();
+        REQUEST_SENDER
+            .set(matrix_request_sender)
+            .expect("BUG: REQUEST_SENDER already set!");
 
-    // Wait for frontend to be ready before proceeding with the init.
-    LOGIN_STORE_READY.wait();
-    info!("FRONTEND IS READY");
+        matrix_request_receiver
+    });
 
     let _monitor = Handle::current().spawn(async move {
         let updaters_arc = Arc::new(config.updaters);
         let inner_updaters = updaters_arc.clone();
 
+        // Wait for frontend to be ready before proceeding with the init.
+        LOGIN_STORE_READY.wait();
+        info!("FRONTEND IS READY");
         // Setup the token refresher thread
         setup_token_background_save(inner_updaters.clone());
+        let matrix_request_receiver = basic_init_handle.await.expect("couldn't do basic init");
 
         let client_opt = match try_restore_session_to_state(config.session_option).await {
             Ok(opt) => opt,
@@ -353,7 +357,7 @@ pub async fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
             init::singletons::subscribe_to_events().expect("Couldn't get UI event receiver"); // subscribe to events so the sender(s) never fail
 
         // Spawn the actual async worker thread.
-        let mut worker_join_handle = Handle::current().spawn(async_worker(receiver));
+        let mut worker_join_handle = Handle::current().spawn(async_worker(matrix_request_receiver));
 
         // // Start the main loop that drives the Matrix client SDK.
         let mut main_loop_join_handle = Handle::current().spawn(async_main_loop(
