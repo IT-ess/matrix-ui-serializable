@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
+use matrix_sdk::{
+    room::RoomMemberRole,
+    ruma::{OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId},
+};
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
 use tracing::{debug, error, trace, warn};
@@ -262,6 +265,8 @@ impl RoomScreen {
                                 display_name_ambiguous: member.name_ambiguous(),
                                 is_ignored: member.is_ignored(),
                                 max_power_level: member.normalized_power_level().into(),
+                                avatar: member.avatar_url().map(|u| u.to_owned()),
+                                role: member.suggested_role_for_power_level().into(),
                             },
                         );
                     });
@@ -534,4 +539,40 @@ pub struct FrontendRoomMember {
     max_power_level: FrontendUserPowerLevel,
     display_name_ambiguous: bool,
     is_ignored: bool,
+    avatar: Option<OwnedMxcUri>,
+    role: FrontendRoomMemberRole,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all_fields = "camelCase", rename_all = "camelCase")]
+/// Same as RoomMemberRole with Serialize
+pub enum FrontendRoomMemberRole {
+    /// The member is a creator.
+    ///
+    /// A creator has an infinite power level and cannot be demoted, so this
+    /// role is immutable. A room can have several creators.
+    ///
+    /// It is available in room versions where
+    /// `explicitly_privilege_room_creators` in [`AuthorizationRules`] is set to
+    /// `true`.
+    ///
+    /// [`AuthorizationRules`]: ruma::room_version_rules::AuthorizationRules
+    Creator,
+    /// The member is an administrator.
+    Administrator,
+    /// The member is a moderator.
+    Moderator,
+    /// The member is a regular user.
+    User,
+}
+
+impl From<RoomMemberRole> for FrontendRoomMemberRole {
+    fn from(value: RoomMemberRole) -> Self {
+        match value {
+            RoomMemberRole::Creator => Self::Creator,
+            RoomMemberRole::Administrator => Self::Administrator,
+            RoomMemberRole::Moderator => Self::Moderator,
+            RoomMemberRole::User => Self::User,
+        }
+    }
 }
