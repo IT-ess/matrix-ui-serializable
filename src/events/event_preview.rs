@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use matrix_sdk::ruma::events::{
-    FullStateEventContent,
+    StateEventContentChange,
     room::{
         guest_access::GuestAccess,
         history_visibility::HistoryVisibility,
@@ -10,7 +10,7 @@ use matrix_sdk::ruma::events::{
     },
 };
 use matrix_sdk_ui::timeline::{
-    AnyOtherFullStateEventContent, EventTimelineItem, MembershipChange, MsgLikeKind,
+    AnyOtherStateEventContentChange, EventTimelineItem, MembershipChange, MsgLikeKind,
     RoomMembershipChange, TimelineItemContent,
 };
 
@@ -99,6 +99,10 @@ pub fn text_preview_of_timeline_item(
                     String::from("[Message was deleted]"),
                     BeforeText::UsernameWithColon,
                 )),
+                MsgLikeKind::LiveLocation(_) => TextPreview::from((
+                    String::from("[Live Location]"),
+                    BeforeText::UsernameWithColon,
+                )),
                 MsgLikeKind::UnableToDecrypt(_encrypted_message) => TextPreview::from((
                     String::from("[Unable to decrypt message]"),
                     BeforeText::UsernameWithColon,
@@ -165,6 +169,7 @@ pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> St
                             .unwrap_or_else(|| poll_state.results().question)
                     )
                 }
+                MsgLikeKind::LiveLocation(_) => String::from("[Live location]"),
                 MsgLikeKind::Other(kind) => kind.event_type().to_string(),
             }
         }
@@ -308,7 +313,7 @@ pub fn text_preview_of_other_state(
     format_as_html: bool,
 ) -> Option<TextPreview> {
     let text = match other_state.content() {
-        AnyOtherFullStateEventContent::RoomAliases(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomAliases(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -323,27 +328,26 @@ pub fn text_preview_of_other_state(
             s.push('.');
             Some(s)
         }
-        AnyOtherFullStateEventContent::RoomAvatar(_) => {
+        AnyOtherStateEventContentChange::RoomAvatar(_) => {
             Some(String::from("set this room's avatar picture."))
         }
-        AnyOtherFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
-            content,
-            ..
-        }) => Some(format!(
+        AnyOtherStateEventContentChange::RoomCanonicalAlias(
+            StateEventContentChange::Original { content, .. },
+        ) => Some(format!(
             "set the main address of this room to {}.",
             content.alias.as_ref().map(|a| a.as_str()).unwrap_or("none")
         )),
-        AnyOtherFullStateEventContent::RoomCreate(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomCreate(StateEventContentChange::Original {
             content,
             ..
         }) => Some(format!(
             "created this room (v{}).",
             content.room_version.as_str()
         )),
-        AnyOtherFullStateEventContent::RoomEncryption(_) => {
+        AnyOtherStateEventContentChange::RoomEncryption(_) => {
             Some(String::from("enabled encryption in this room."))
         }
-        AnyOtherFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomGuestAccess(StateEventContentChange::Original {
             content,
             ..
         }) => Some(match &content.guest_access {
@@ -354,10 +358,9 @@ pub fn text_preview_of_other_state(
                 custom.as_str()
             ),
         }),
-        AnyOtherFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
-            content,
-            ..
-        }) => Some(format!(
+        AnyOtherStateEventContentChange::RoomHistoryVisibility(
+            StateEventContentChange::Original { content, .. },
+        ) => Some(format!(
             "set this room's history to be visible by {}",
             match &content.history_visibility {
                 HistoryVisibility::Invited => "invited users, since they were invited.",
@@ -367,7 +370,7 @@ pub fn text_preview_of_other_state(
                 custom => custom.as_str(),
             },
         )),
-        AnyOtherFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomJoinRules(StateEventContentChange::Original {
             content,
             ..
         }) => Some(match &content.join_rule {
@@ -385,14 +388,14 @@ pub fn text_preview_of_other_state(
             JoinRule::Invite => String::from("set this room to be joinable by invite only."),
             custom => format!("set custom join rules for this room: {}", custom.as_str()),
         }),
-        AnyOtherFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Original {
             content,
             ..
         }) => Some(format!(
             "pinned {} events in this room.",
             content.pinned.len()
         )),
-        AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomName(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -403,20 +406,20 @@ pub fn text_preview_of_other_state(
             };
             Some(format!("changed this room's name to \"{name}\"."))
         }
-        AnyOtherFullStateEventContent::RoomPowerLevels(_) => {
+        AnyOtherStateEventContentChange::RoomPowerLevels(_) => {
             Some(String::from("set the power levels for this room."))
         }
-        AnyOtherFullStateEventContent::RoomServerAcl(_) => Some(String::from(
+        AnyOtherStateEventContentChange::RoomServerAcl(_) => Some(String::from(
             "set the server access control list for this room.",
         )),
-        AnyOtherFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomTombstone(StateEventContentChange::Original {
             content,
             ..
         }) => Some(format!(
             "closed this room and upgraded it to {}",
             content.replacement_room.matrix_to_uri()
         )),
-        AnyOtherFullStateEventContent::RoomTopic(FullStateEventContent::Original {
+        AnyOtherStateEventContentChange::RoomTopic(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -427,7 +430,7 @@ pub fn text_preview_of_other_state(
             };
             Some(format!("changed this room's topic to \"{topic}\"."))
         }
-        AnyOtherFullStateEventContent::SpaceParent(_) => {
+        AnyOtherStateEventContentChange::SpaceParent(_) => {
             let state_key = if format_as_html {
                 htmlize::escape_text(other_state.state_key())
             } else {
@@ -435,7 +438,7 @@ pub fn text_preview_of_other_state(
             };
             Some(format!("set this room's parent space to \"{state_key}\"."))
         }
-        AnyOtherFullStateEventContent::SpaceChild(_) => {
+        AnyOtherStateEventContentChange::SpaceChild(_) => {
             let state_key = if format_as_html {
                 htmlize::escape_text(other_state.state_key())
             } else {

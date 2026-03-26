@@ -102,6 +102,15 @@ pub fn get_latest_event_details(
                     .format_with(&sender_username, true),
             ))
         }
+        LatestEventValue::RemoteInvite {
+            timestamp,
+            inviter: _,
+            inviter_profile,
+        } => {
+            let sender_username =
+                get_sender_username_from_profile(inviter_profile).unwrap_or("".to_owned());
+            Some((timestamp, format!("New invite from {sender_username}")))
+        }
         LatestEventValue::None => None,
     }
 }

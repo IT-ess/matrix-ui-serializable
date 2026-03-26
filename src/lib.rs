@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 use std::{path::PathBuf, sync::Arc, thread, time::Duration};
 
 use futures::StreamExt;
