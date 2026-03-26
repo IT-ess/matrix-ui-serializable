@@ -40,3 +40,4 @@ rand = "0.9.2"
 url = "2.5.7"
 mime = "0.3.17"
 tracing = "0.1.43"
+reqwest = { version = "0.13.2", default-features = false, features = ["default-tls"] }
