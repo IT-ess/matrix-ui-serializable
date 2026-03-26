@@ -1066,6 +1066,33 @@ pub async fn async_worker(
                     }
                 });
             }
+            MatrixRequest::KickOrBanUserFromRoom {
+                room_id,
+                user_id,
+                is_ban,
+                reason,
+            } => {
+                let Some(client) = CLIENT.get() else { continue };
+                let _kick_task = Handle::current().spawn(async move {
+                    let room = client
+                        .get_room(&room_id)
+                        .expect("Room should be defined if we can ban users from it");
+                    if let Err(e) = if is_ban {
+                        room.ban_user(&user_id, reason.as_deref()).await
+                    } else {
+                        room.kick_user(&user_id, reason.as_deref()).await
+                    } {
+                        error!("Cannot kick or ban user. {e}");
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Failed to kick or ban user. {e}"),
+                            Some(format!("Error: {e:?}")),
+                            ToastNotificationVariant::Error,
+                        ));
+                    } else {
+                        submit_async_request(MatrixRequest::SyncRoomMemberList { room_id });
+                    }
+                });
+            }
         }
     }
 

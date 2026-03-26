@@ -183,6 +183,12 @@ pub enum MatrixRequest {
         room_id: OwnedRoomId,
         invited_user_ids: Vec<OwnedUserId>,
     },
+    KickOrBanUserFromRoom {
+        room_id: OwnedRoomId,
+        user_id: OwnedUserId,
+        reason: Option<String>,
+        is_ban: bool,
+    },
 }
 // Deserialize trait is implemented in models/async_requests.rs
 
@@ -405,6 +411,16 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     invited_user_ids: data.invited_user_ids,
                 })
             }
+            "kickOrBanUserFromRoom" => {
+                let data: KickOrBanUserFromRoomPayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::KickOrBanUserFromRoom {
+                    room_id: data.room_id,
+                    user_id: data.user_id,
+                    reason: data.reason,
+                    is_ban: data.is_ban,
+                })
+            }
             _ => Err(serde::de::Error::unknown_variant(
                 event,
                 &[
@@ -432,6 +448,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "createDMRoom",
                     "createRoom",
                     "inviteUsersInRoom",
+                    "kickOrBanUserFromRoom",
                 ],
             )),
         }
@@ -604,4 +621,13 @@ struct CreateRoomPayload {
 struct InviteUsersInRoomPayload {
     room_id: OwnedRoomId,
     invited_user_ids: Vec<OwnedUserId>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KickOrBanUserFromRoomPayload {
+    room_id: OwnedRoomId,
+    user_id: OwnedUserId,
+    reason: Option<String>,
+    is_ban: bool,
 }

@@ -5,7 +5,9 @@ use std::{
 
 use matrix_sdk::{
     room::RoomMemberRole,
-    ruma::{OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId},
+    ruma::{
+        OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId, events::room::member::MembershipState,
+    },
 };
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
@@ -267,6 +269,7 @@ impl RoomScreen {
                                 max_power_level: member.normalized_power_level().into(),
                                 avatar: member.avatar_url().map(|u| u.to_owned()),
                                 role: member.suggested_role_for_power_level().into(),
+                                membership: member.membership().to_owned(),
                             },
                         );
                     });
@@ -541,6 +544,7 @@ pub struct FrontendRoomMember {
     is_ignored: bool,
     avatar: Option<OwnedMxcUri>,
     role: FrontendRoomMemberRole,
+    membership: MembershipState,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
