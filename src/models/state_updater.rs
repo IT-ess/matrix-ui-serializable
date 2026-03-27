@@ -7,7 +7,6 @@ use matrix_sdk::{
 use crate::{
     room::{room_screen::RoomScreen, rooms_list::RoomsList},
     stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState},
-    user::user_profile::UserProfileMap,
 };
 use async_trait::async_trait;
 
@@ -23,7 +22,6 @@ pub trait StateUpdaterFunctions {
         &self,
         sync_service_state: FrontendSyncServiceState,
     ) -> anyhow::Result<()>;
-    fn update_profile(&self, user_profiles: &UserProfileMap) -> anyhow::Result<()>;
     fn update_login_state(
         &self,
         login_state: LoginState,

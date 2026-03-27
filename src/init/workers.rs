@@ -251,7 +251,7 @@ pub async fn async_worker(
                     // Get room members details after the list sync.
                     submit_async_request(MatrixRequest::GetRoomMembers {
                         room_id,
-                        memberships: RoomMemberships::all(),
+                        memberships: RoomMemberships::JOIN,
                         local_only: false,
                     });
                     broadcast_event(UIUpdateMessage::RefreshUI);
@@ -373,12 +373,10 @@ pub async fn async_worker(
                 user_id,
                 room_id,
                 local_only,
+                sender,
             } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _fetch_task = Handle::current().spawn(async move {
-                    debug!("Sending get user profile request: user: {user_id}, \
-                        room: {room_id:?}, local_only: {local_only}...",
-                    );
 
                     let mut update = None;
 
@@ -394,10 +392,10 @@ pub async fn async_worker(
                                     new_profile: UserProfile {
                                         username: room_member.display_name().map(|u| u.to_owned()),
                                         user_id: user_id.clone(),
-                                        avatar_url: room_member.avatar_url().map(|u| u.to_owned()),
+                                        avatar: room_member.avatar_url().map(|u| u.to_owned()),
                                     },
                                     room_id: room_id.to_owned(),
-                                    _room_member: room_member,
+                                    room_member,
                                 });
                             } else {
                                 warn!("User profile request: user {user_id} was not a member of room {room_id}");
@@ -414,7 +412,9 @@ pub async fn async_worker(
                                     UserProfile {
                                         username: response.get_static::<DisplayName>().ok().flatten(),
                                         user_id: user_id.clone(),
-                                        avatar_url: response.get_static::<AvatarUrl>().ok().flatten(),
+                                        avatar: response.get_static::<AvatarUrl>()
+                                            .ok()
+                                            .unwrap_or_default(),
                                     }
                                 ));
                             } else {
@@ -425,7 +425,7 @@ pub async fn async_worker(
                         match update.as_mut() {
                             Some(UserProfileUpdate::Full { new_profile: UserProfile { username, .. }, .. }) if username.is_none() => {
                                 if let Ok(response) = client.account().fetch_user_profile_of(&user_id).await {
-                                   *username = response.get_static::<DisplayName>().ok().flatten();
+                                    *username = response.get_static::<DisplayName>().ok().flatten();
                                 }
                             }
                             _ => { }
@@ -433,6 +433,9 @@ pub async fn async_worker(
                     }
 
                     if let Some(upd) = update {
+                        if let Some(sender) = sender {
+                         let _ = sender.send(upd.get_user_profile_from_update().cloned());
+                        }
                         debug!("Successfully completed get user profile request: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                         enqueue_user_profile_update(upd);
                     } else {
@@ -927,40 +930,14 @@ pub async fn async_worker(
             }
             MatrixRequest::CreateDMRoom { user_id } => {
                 let Some(client) = CLIENT.get() else { continue };
-                // Do not create an extra if one already exists
-                if client.get_dm_room(&user_id).is_some() {
-                    enqueue_toast_notification(ToastNotificationRequest::new(
-                        format!("A DM room already exists for user {user_id}"),
-                        None,
-                        ToastNotificationVariant::Error,
-                    ));
-                    continue;
-                }
                 let _create_dm_room_task = Handle::current().spawn(async move {
-                    let mut request = create_room::v3::Request::new();
-                    request.is_direct = true;
-                    request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Private;
-                    request.invite = vec![user_id.clone()];
-                    request.preset = Some(create_room::v3::RoomPreset::TrustedPrivateChat);
-                    request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V12);
-
-                    match client.create_room(request).await {
+                    match client.create_dm(&user_id).await {
                         Ok(room) => {
+                            let event_bridge =
+                                get_event_bridge().expect("event bridge should be defined");
+                            event_bridge
+                                .emit(EmitEvent::NewlyCreatedRoomId(room.room_id().to_owned()));
                             info!("Sucessfully created DM room with user {user_id}");
-                            if let Err(e) = room.enable_encryption().await {
-                                enqueue_toast_notification(ToastNotificationRequest::new(
-                                    format!("Failed to enable encryption in Room. Error: {e}"),
-                                    None,
-                                    ToastNotificationVariant::Error,
-                                ))
-                            } else {
-                                info!("Enabled encryption for personal room");
-                                enqueue_toast_notification(ToastNotificationRequest::new(
-                                    format!("Sucessfully created DM room for user {user_id}"),
-                                    None,
-                                    ToastNotificationVariant::Success,
-                                ));
-                            }
                         }
                         Err(e) => {
                             error!(
@@ -1066,6 +1043,33 @@ pub async fn async_worker(
                     }
                 });
             }
+            MatrixRequest::KickOrBanUserFromRoom {
+                room_id,
+                user_id,
+                is_ban,
+                reason,
+            } => {
+                let Some(client) = CLIENT.get() else { continue };
+                let _kick_task = Handle::current().spawn(async move {
+                    let room = client
+                        .get_room(&room_id)
+                        .expect("Room should be defined if we can ban users from it");
+                    if let Err(e) = if is_ban {
+                        room.ban_user(&user_id, reason.as_deref()).await
+                    } else {
+                        room.kick_user(&user_id, reason.as_deref()).await
+                    } {
+                        error!("Cannot kick or ban user. {e}");
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Failed to kick or ban user. {e}"),
+                            Some(format!("Error: {e:?}")),
+                            ToastNotificationVariant::Error,
+                        ));
+                    } else {
+                        submit_async_request(MatrixRequest::SyncRoomMemberList { room_id });
+                    }
+                });
+            }
         }
     }
 
@@ -1107,7 +1111,7 @@ pub async fn ui_worker(
                 let mut lock = rooms_list.lock().await;
                 lock.handle_rooms_list_updates().await;
 
-                process_user_profile_updates(&state_updaters).await; // Each time the UI is refreshed we check the profiles update queue.
+                process_user_profile_updates(); // Each time the UI is refreshed we check the profiles update queue.
 
                 let _ = process_toast_notifications().await;
             }

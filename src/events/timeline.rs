@@ -22,7 +22,9 @@ use tokio::sync::watch;
 use tracing::{debug, error, trace};
 
 use crate::{
-    events::event_preview::text_preview_of_timeline_item,
+    events::{
+        event_preview::text_preview_of_timeline_item, handlers::get_sender_username_from_profile,
+    },
     init::singletons::{CLIENT, UIUpdateMessage, broadcast_event},
     models::async_requests::{MatrixRequest, submit_async_request},
     room::{
@@ -230,7 +232,7 @@ fn serialize_timeline_items(
 ) -> Vec<FrontendTimelineItem> {
     items
         .iter()
-        .map(|item| to_frontend_timeline_item(item, Some(room_id), user_power_levels))
+        .filter_map(|item| to_frontend_timeline_item(item, Some(room_id), user_power_levels))
         .collect()
 }
 
@@ -602,6 +604,21 @@ pub async fn update_latest_event(room: &Room) {
                 timestamp,
                 content,
             )
+        }
+        LatestEventValue::RemoteInvite {
+            timestamp,
+            inviter,
+            inviter_profile,
+        } => {
+            let sender_username = get_sender_username_from_profile(inviter_profile)
+                .unwrap_or_else(|| inviter.map(|i| i.to_string()).unwrap_or("".to_owned()));
+
+            enqueue_rooms_list_update(RoomsListUpdate::UpdateLatestEvent {
+                room_id: room.room_id().to_owned(),
+                timestamp,
+                latest_message_text: format!("New invite from {sender_username}"),
+            });
+            return;
         }
         LatestEventValue::None => return,
     };

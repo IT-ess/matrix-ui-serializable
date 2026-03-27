@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 use std::{path::PathBuf, sync::Arc, thread, time::Duration};
 
 use futures::StreamExt;
@@ -433,8 +434,7 @@ pub use models::async_requests::*;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};
-pub use user::user_profile::UserProfileMap;
-
+pub use user::user_profile::UserProfile;
 // The adapter needs some types in those modules
 pub use matrix_sdk::AuthSession;
 pub use matrix_sdk::encryption::recovery::RecoveryState;

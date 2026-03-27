@@ -13,6 +13,7 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
+    user::user_profile::UserProfile,
     utils::guess_device_type,
 };
 use anyhow::anyhow;
@@ -53,17 +54,20 @@ pub async fn check_homeserver_auth_type() -> crate::Result<FrontendAuthTypeRespo
 }
 
 /// Submit a request to the Matrix Client that will be executed asynchronously.
-pub fn submit_async_request(request: MatrixRequest) -> crate::Result<()> {
+pub fn submit_async_request(request: MatrixRequest) {
     crate::models::async_requests::submit_async_request(request);
-    Ok(())
 }
 
-/// Fetches a given User Profile and adds it to this lib's User Profile cache.
 pub async fn fetch_user_profile(
     user_id: OwnedUserId,
-    room_id: Option<OwnedRoomId>,
-) -> crate::Result<bool> {
-    Ok(crate::user::user_profile::fetch_user_profile(user_id, room_id).await)
+    room_id: Option<&OwnedRoomId>,
+) -> crate::Result<UserProfile> {
+    let (tx, rx) = oneshot::channel();
+    crate::user::user_profile::with_sender(user_id, room_id, true, tx);
+    Ok(rx
+        .await
+        .map_err(anyhow::Error::from)?
+        .ok_or(anyhow!("Update was room only. Cannot get user profile"))?)
 }
 
 /// Get the list of this user's account registered devices.
@@ -261,6 +265,21 @@ pub async fn define_room_informations(payload: EditRoomInformationPayload) -> cr
         room.set_room_topic(&topic).await?;
     }
     Ok(())
+}
+
+pub fn get_dm_room_id_or_create_it(user_id: OwnedUserId) -> Option<OwnedRoomId> {
+    let client = CLIENT.wait();
+    let res = client
+        .get_dm_room(&user_id)
+        .map(|room| room.room_id().to_owned());
+    if res.is_none() {
+        // If the room doesn't exist, then we send a request to create it.
+        // The room_id will be sent to front through an event.
+        crate::models::async_requests::submit_async_request(MatrixRequest::CreateDMRoom {
+            user_id,
+        });
+    }
+    res
 }
 
 pub async fn register_notifications(

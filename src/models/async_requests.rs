@@ -14,7 +14,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::{
-    events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER,
+    UserProfile, events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER,
     models::profile::ProfileModel,
     room::frontend_events::timeline_item_id::FrontendTimelineEventItemId,
 };
@@ -79,6 +79,9 @@ pub enum MatrixRequest {
         /// * If `true` (not recommended), only the local cache will be accessed.
         /// * If `false` (recommended), details will be fetched from the server.
         local_only: bool,
+        /// matrix-svelte-client: sender used if a command is awaiting for the
+        /// profile. We send it directly through this channel
+        sender: Option<oneshot::Sender<Option<UserProfile>>>,
     },
     /// Request to fetch the number of unread messages in the given room.
     GetNumberUnreadMessages { room_id: OwnedRoomId },
@@ -183,6 +186,12 @@ pub enum MatrixRequest {
         room_id: OwnedRoomId,
         invited_user_ids: Vec<OwnedUserId>,
     },
+    KickOrBanUserFromRoom {
+        room_id: OwnedRoomId,
+        user_id: OwnedUserId,
+        reason: Option<String>,
+        is_ban: bool,
+    },
 }
 // Deserialize trait is implemented in models/async_requests.rs
 
@@ -272,6 +281,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     user_id: data.user_id,
                     room_id: data.room_id,
                     local_only: data.local_only,
+                    sender: None,
                 })
             }
             "getNumberUnreadMessages" => {
@@ -405,6 +415,16 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     invited_user_ids: data.invited_user_ids,
                 })
             }
+            "kickOrBanUserFromRoom" => {
+                let data: KickOrBanUserFromRoomPayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::KickOrBanUserFromRoom {
+                    room_id: data.room_id,
+                    user_id: data.user_id,
+                    reason: data.reason,
+                    is_ban: data.is_ban,
+                })
+            }
             _ => Err(serde::de::Error::unknown_variant(
                 event,
                 &[
@@ -432,6 +452,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "createDMRoom",
                     "createRoom",
                     "inviteUsersInRoom",
+                    "kickOrBanUserFromRoom",
                 ],
             )),
         }
@@ -604,4 +625,13 @@ struct CreateRoomPayload {
 struct InviteUsersInRoomPayload {
     room_id: OwnedRoomId,
     invited_user_ids: Vec<OwnedUserId>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KickOrBanUserFromRoomPayload {
+    room_id: OwnedRoomId,
+    user_id: OwnedUserId,
+    reason: Option<String>,
+    is_ban: bool,
 }

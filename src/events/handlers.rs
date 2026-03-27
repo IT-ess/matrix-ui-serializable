@@ -1,16 +1,23 @@
+use std::time::Duration;
+
 use matrix_sdk::{
-    Client,
+    Client, Room, RoomState,
     ruma::{
         MilliSecondsSinceUnixEpoch,
         events::{
             key::verification::request::ToDeviceKeyVerificationRequestEvent,
-            room::message::{MessageType, OriginalSyncRoomMessageEvent},
+            room::{
+                member::OriginalSyncRoomMemberEvent,
+                message::{MessageType, OriginalSyncRoomMessageEvent},
+            },
         },
     },
 };
 use matrix_sdk_ui::timeline::{LatestEventValue, Profile, TimelineDetails};
 use tokio::runtime::Handle;
 use tracing::warn;
+
+use crate::init::singletons::MEMBERSHIP_UPDATES_EXPIRY_MAP;
 
 use super::{
     emoji_verification::request_verification_handler, event_preview::text_preview_of_timeline_item,
@@ -60,6 +67,18 @@ pub fn add_event_handlers(client: &Client) -> anyhow::Result<()> {
         }
     );
 
+    client.add_event_handler(|_: OriginalSyncRoomMemberEvent, room: Room| async move {
+        if room.state() != RoomState::Joined {
+            return;
+        }
+        // We add this room in an expiry map. When the duration will be expired, it will trigger
+        // a request to update memberships on this room. Since it is a map, new values overwrite
+        // the previous "Instant" and then acts as a debouncer.
+        // The members are updated from cache only, so we don't try to fetch large member lists
+        // from too large rooms we may haven't seen yet.
+        MEMBERSHIP_UPDATES_EXPIRY_MAP.insert(room.room_id().to_owned(), Duration::from_millis(200));
+    });
+
     Ok(())
 }
 
@@ -101,6 +120,15 @@ pub fn get_latest_event_details(
                 text_preview_of_timeline_item(&content, &sender_username)
                     .format_with(&sender_username, true),
             ))
+        }
+        LatestEventValue::RemoteInvite {
+            timestamp,
+            inviter: _,
+            inviter_profile,
+        } => {
+            let sender_username =
+                get_sender_username_from_profile(inviter_profile).unwrap_or("".to_owned());
+            Some((timestamp, format!("New invite from {sender_username}")))
         }
         LatestEventValue::None => None,
     }

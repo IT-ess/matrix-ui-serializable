@@ -3,8 +3,8 @@ use std::ops::DerefMut;
 
 use matrix_sdk::ruma::OwnedMxcUri;
 use matrix_sdk::ruma::UserId;
-use matrix_sdk::ruma::events::FullStateEventContent;
 use matrix_sdk::ruma::events::RedactContent;
+use matrix_sdk::ruma::events::StateEventContentChange;
 use matrix_sdk::ruma::events::StaticStateEventContent;
 use matrix_sdk::ruma::events::policy::rule::room::PolicyRuleRoomEventContent;
 use matrix_sdk::ruma::events::policy::rule::server::PolicyRuleServerEventContent;
@@ -28,7 +28,7 @@ use matrix_sdk::ruma::events::room::tombstone::RoomTombstoneEventContent;
 use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::space::parent::SpaceParentEventContent;
-use matrix_sdk_ui::timeline::AnyOtherFullStateEventContent;
+use matrix_sdk_ui::timeline::AnyOtherStateEventContentChange;
 use matrix_sdk_ui::timeline::MemberProfileChange;
 use matrix_sdk_ui::timeline::MembershipChange;
 use matrix_sdk_ui::timeline::RoomMembershipChange;
@@ -43,7 +43,7 @@ use serde::Serializer;
     content = "body"
 )]
 pub enum FrontendStateEvent {
-    OtherState(FrontendAnyOtherFullStateEventContent),
+    OtherState(FrontendAnyOtherStateEventContentChange),
     MembershipChange(FrontendRoomMembershipChange),
     ProfileChange(FrontendMemberProfileChange),
 }
@@ -52,28 +52,28 @@ pub enum FrontendStateEvent {
 // COMMON
 //
 
-// Newtype for FullStateEventContent
+// Newtype for StateEventContentChange
 #[derive(Debug, Clone)]
-struct FrontendFullStateEventContent<C>(FullStateEventContent<C>)
+struct FrontendStateEventContentChange<C>(StateEventContentChange<C>)
 where
     C: StaticStateEventContent + RedactContent,
     C::Redacted: std::fmt::Debug + Clone,
     C::PossiblyRedacted: std::fmt::Debug + Clone;
 
-impl<C> Deref for FrontendFullStateEventContent<C>
+impl<C> Deref for FrontendStateEventContentChange<C>
 where
     C: StaticStateEventContent + RedactContent,
     C::Redacted: std::fmt::Debug + Clone,
     C::PossiblyRedacted: std::fmt::Debug + Clone,
 {
-    type Target = FullStateEventContent<C>;
+    type Target = StateEventContentChange<C>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<C> DerefMut for FrontendFullStateEventContent<C>
+impl<C> DerefMut for FrontendStateEventContentChange<C>
 where
     C: StaticStateEventContent + RedactContent,
     C::Redacted: std::fmt::Debug + Clone,
@@ -84,19 +84,19 @@ where
     }
 }
 
-impl<C> From<FullStateEventContent<C>> for FrontendFullStateEventContent<C>
+impl<C> From<StateEventContentChange<C>> for FrontendStateEventContentChange<C>
 where
     C: StaticStateEventContent + RedactContent,
     C::Redacted: std::fmt::Debug + Clone,
     C::PossiblyRedacted: std::fmt::Debug + Clone,
 {
-    fn from(content: FullStateEventContent<C>) -> Self {
-        FrontendFullStateEventContent(content)
+    fn from(content: StateEventContentChange<C>) -> Self {
+        FrontendStateEventContentChange(content)
     }
 }
 
-// Implement Serialize for the FullStateEventContent wrapper
-impl<C> Serialize for FrontendFullStateEventContent<C>
+// Implement Serialize for the StateEventContentChange wrapper
+impl<C> Serialize for FrontendStateEventContentChange<C>
 where
     C: StaticStateEventContent + RedactContent + Serialize,
     C::PossiblyRedacted: Serialize + std::fmt::Debug + Clone,
@@ -107,17 +107,17 @@ where
         S: Serializer,
     {
         match &self.0 {
-            FullStateEventContent::Original {
+            StateEventContentChange::Original {
                 content,
                 prev_content,
             } => {
                 use serde::ser::SerializeStruct;
-                let mut state = serializer.serialize_struct("FullStateEventContent", 2)?;
+                let mut state = serializer.serialize_struct("StateEventContentChange", 2)?;
                 state.serialize_field("content", content)?;
                 state.serialize_field("prev_content", prev_content)?;
                 state.end()
             }
-            FullStateEventContent::Redacted(redacted) => redacted.serialize(serializer),
+            StateEventContentChange::Redacted(redacted) => redacted.serialize(serializer),
         }
     }
 }
@@ -126,172 +126,176 @@ where
 // OTHER STATE
 //
 
-// Newtype for AnyOtherFullStateEventContent
+// Newtype for AnyOtherStateEventContentChange
 #[derive(Debug, Clone)]
-pub struct FrontendAnyOtherFullStateEventContent(AnyOtherFullStateEventContent);
+pub struct FrontendAnyOtherStateEventContentChange(AnyOtherStateEventContentChange);
 
-impl Deref for FrontendAnyOtherFullStateEventContent {
-    type Target = AnyOtherFullStateEventContent;
+impl Deref for FrontendAnyOtherStateEventContentChange {
+    type Target = AnyOtherStateEventContentChange;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for FrontendAnyOtherFullStateEventContent {
+impl DerefMut for FrontendAnyOtherStateEventContentChange {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<AnyOtherFullStateEventContent> for FrontendAnyOtherFullStateEventContent {
-    fn from(content: AnyOtherFullStateEventContent) -> Self {
-        FrontendAnyOtherFullStateEventContent(content)
+impl From<AnyOtherStateEventContentChange> for FrontendAnyOtherStateEventContentChange {
+    fn from(content: AnyOtherStateEventContentChange) -> Self {
+        FrontendAnyOtherStateEventContentChange(content)
     }
 }
 
-// Updated enum using the wrapped FullStateEventContent
+// Updated enum using the wrapped StateEventContentChange
 #[derive(Clone, Debug, Serialize)]
-enum FrontendAnyOtherFullStateEventContentEnum {
+enum FrontendAnyOtherStateEventContentChangeEnum {
     /// m.policy.rule.room
-    PolicyRuleRoom(FrontendFullStateEventContent<PolicyRuleRoomEventContent>),
+    PolicyRuleRoom(FrontendStateEventContentChange<PolicyRuleRoomEventContent>),
 
     /// m.policy.rule.server
-    PolicyRuleServer(FrontendFullStateEventContent<PolicyRuleServerEventContent>),
+    PolicyRuleServer(FrontendStateEventContentChange<PolicyRuleServerEventContent>),
 
     /// m.policy.rule.user
-    PolicyRuleUser(FrontendFullStateEventContent<PolicyRuleUserEventContent>),
+    PolicyRuleUser(FrontendStateEventContentChange<PolicyRuleUserEventContent>),
 
     /// m.room.aliases
-    RoomAliases(FrontendFullStateEventContent<RoomAliasesEventContent>),
+    RoomAliases(FrontendStateEventContentChange<RoomAliasesEventContent>),
 
     /// m.room.avatar
-    RoomAvatar(FrontendFullStateEventContent<RoomAvatarEventContent>),
+    RoomAvatar(FrontendStateEventContentChange<RoomAvatarEventContent>),
 
     /// m.room.canonical_alias
-    RoomCanonicalAlias(FrontendFullStateEventContent<RoomCanonicalAliasEventContent>),
+    RoomCanonicalAlias(FrontendStateEventContentChange<RoomCanonicalAliasEventContent>),
 
     /// m.room.create
-    RoomCreate(FrontendFullStateEventContent<RoomCreateEventContent>),
+    RoomCreate(FrontendStateEventContentChange<RoomCreateEventContent>),
 
     /// m.room.encryption
-    RoomEncryption(FrontendFullStateEventContent<RoomEncryptionEventContent>),
+    RoomEncryption(FrontendStateEventContentChange<RoomEncryptionEventContent>),
 
     /// m.room.guest_access
-    RoomGuestAccess(FrontendFullStateEventContent<RoomGuestAccessEventContent>),
+    RoomGuestAccess(FrontendStateEventContentChange<RoomGuestAccessEventContent>),
 
     /// m.room.history_visibility
-    RoomHistoryVisibility(FrontendFullStateEventContent<RoomHistoryVisibilityEventContent>),
+    RoomHistoryVisibility(FrontendStateEventContentChange<RoomHistoryVisibilityEventContent>),
 
     /// m.room.join_rules
-    RoomJoinRules(FrontendFullStateEventContent<RoomJoinRulesEventContent>),
+    RoomJoinRules(FrontendStateEventContentChange<RoomJoinRulesEventContent>),
 
     /// m.room.name
-    RoomName(FrontendFullStateEventContent<RoomNameEventContent>),
+    RoomName(FrontendStateEventContentChange<RoomNameEventContent>),
 
     /// m.room.pinned_events
-    RoomPinnedEvents(FrontendFullStateEventContent<RoomPinnedEventsEventContent>),
+    RoomPinnedEvents(FrontendStateEventContentChange<RoomPinnedEventsEventContent>),
 
     /// m.room.power_levels
-    RoomPowerLevels(FrontendFullStateEventContent<RoomPowerLevelsEventContent>),
+    RoomPowerLevels(FrontendStateEventContentChange<RoomPowerLevelsEventContent>),
 
     /// m.room.server_acl
-    RoomServerAcl(FrontendFullStateEventContent<RoomServerAclEventContent>),
+    RoomServerAcl(FrontendStateEventContentChange<RoomServerAclEventContent>),
 
     /// m.room.third_party_invite
-    RoomThirdPartyInvite(FrontendFullStateEventContent<RoomThirdPartyInviteEventContent>),
+    RoomThirdPartyInvite(FrontendStateEventContentChange<RoomThirdPartyInviteEventContent>),
 
     /// m.room.tombstone
-    RoomTombstone(FrontendFullStateEventContent<RoomTombstoneEventContent>),
+    RoomTombstone(FrontendStateEventContentChange<RoomTombstoneEventContent>),
 
     /// m.room.topic
-    RoomTopic(FrontendFullStateEventContent<RoomTopicEventContent>),
+    RoomTopic(FrontendStateEventContentChange<RoomTopicEventContent>),
 
     /// m.space.child
-    SpaceChild(FrontendFullStateEventContent<SpaceChildEventContent>),
+    SpaceChild(FrontendStateEventContentChange<SpaceChildEventContent>),
 
     /// m.space.parent
-    SpaceParent(FrontendFullStateEventContent<SpaceParentEventContent>),
+    SpaceParent(FrontendStateEventContentChange<SpaceParentEventContent>),
 
     // Custom
     Custom,
 }
 
 // Implement Serialize for the main wrapper by converting to the serializable enum
-impl Serialize for FrontendAnyOtherFullStateEventContent {
+impl Serialize for FrontendAnyOtherStateEventContentChange {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         // Convert the inner enum to our serializable version
         let serializable_enum = match &self.0 {
-            AnyOtherFullStateEventContent::PolicyRuleRoom(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::PolicyRuleRoom(content.clone().into())
+            AnyOtherStateEventContentChange::PolicyRuleRoom(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::PolicyRuleRoom(content.clone().into())
             }
-            AnyOtherFullStateEventContent::PolicyRuleServer(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::PolicyRuleServer(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::PolicyRuleUser(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::PolicyRuleUser(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::RoomAliases(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomAliases(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::RoomAvatar(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomAvatar(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::RoomCanonicalAlias(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomCanonicalAlias(
+            AnyOtherStateEventContentChange::PolicyRuleServer(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::PolicyRuleServer(
                     content.clone().into(),
                 )
             }
-            AnyOtherFullStateEventContent::RoomCreate(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomCreate(content.clone().into())
+            AnyOtherStateEventContentChange::PolicyRuleUser(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::PolicyRuleUser(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomEncryption(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomEncryption(content.clone().into())
+            AnyOtherStateEventContentChange::RoomAliases(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomAliases(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomGuestAccess(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomGuestAccess(content.clone().into())
+            AnyOtherStateEventContentChange::RoomAvatar(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomAvatar(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomHistoryVisibility(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomHistoryVisibility(
+            AnyOtherStateEventContentChange::RoomCanonicalAlias(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomCanonicalAlias(
                     content.clone().into(),
                 )
             }
-            AnyOtherFullStateEventContent::RoomJoinRules(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomJoinRules(content.clone().into())
+            AnyOtherStateEventContentChange::RoomCreate(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomCreate(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomName(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomName(content.clone().into())
+            AnyOtherStateEventContentChange::RoomEncryption(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomEncryption(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomPinnedEvents(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomPinnedEvents(content.clone().into())
+            AnyOtherStateEventContentChange::RoomGuestAccess(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomGuestAccess(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomPowerLevels(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomPowerLevels(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::RoomServerAcl(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomServerAcl(content.clone().into())
-            }
-            AnyOtherFullStateEventContent::RoomThirdPartyInvite(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomThirdPartyInvite(
+            AnyOtherStateEventContentChange::RoomHistoryVisibility(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomHistoryVisibility(
                     content.clone().into(),
                 )
             }
-            AnyOtherFullStateEventContent::RoomTombstone(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomTombstone(content.clone().into())
+            AnyOtherStateEventContentChange::RoomJoinRules(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomJoinRules(content.clone().into())
             }
-            AnyOtherFullStateEventContent::RoomTopic(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::RoomTopic(content.clone().into())
+            AnyOtherStateEventContentChange::RoomName(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomName(content.clone().into())
             }
-            AnyOtherFullStateEventContent::SpaceChild(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::SpaceChild(content.clone().into())
+            AnyOtherStateEventContentChange::RoomPinnedEvents(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomPinnedEvents(
+                    content.clone().into(),
+                )
             }
-            AnyOtherFullStateEventContent::SpaceParent(content) => {
-                FrontendAnyOtherFullStateEventContentEnum::SpaceParent(content.clone().into())
+            AnyOtherStateEventContentChange::RoomPowerLevels(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomPowerLevels(content.clone().into())
             }
-            _ => FrontendAnyOtherFullStateEventContentEnum::Custom,
+            AnyOtherStateEventContentChange::RoomServerAcl(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomServerAcl(content.clone().into())
+            }
+            AnyOtherStateEventContentChange::RoomThirdPartyInvite(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomThirdPartyInvite(
+                    content.clone().into(),
+                )
+            }
+            AnyOtherStateEventContentChange::RoomTombstone(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomTombstone(content.clone().into())
+            }
+            AnyOtherStateEventContentChange::RoomTopic(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::RoomTopic(content.clone().into())
+            }
+            AnyOtherStateEventContentChange::SpaceChild(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::SpaceChild(content.clone().into())
+            }
+            AnyOtherStateEventContentChange::SpaceParent(content) => {
+                FrontendAnyOtherStateEventContentChangeEnum::SpaceParent(content.clone().into())
+            }
+            _ => FrontendAnyOtherStateEventContentChangeEnum::Custom,
         };
 
         serializable_enum.serialize(serializer)
@@ -385,7 +389,7 @@ impl Serialize for FrontendRoomMembershipChange {
         state.serialize_field("user_id", self.user_id())?;
 
         // Serialize content using the FrontendFullStateEventContent wrapper
-        let frontend_content = FrontendFullStateEventContent::from(self.content().clone());
+        let frontend_content = FrontendStateEventContentChange::from(self.content().clone());
         state.serialize_field("content", &frontend_content)?;
 
         // Serialize change, wrapping Option<MembershipChange> with our frontend type
@@ -410,7 +414,7 @@ impl FrontendRoomMembershipChange {
         // Or if it has some other accessor method, use that instead
     }
 
-    pub fn content(&self) -> &FullStateEventContent<RoomMemberEventContent> {
+    pub fn content(&self) -> &StateEventContentChange<RoomMemberEventContent> {
         // If RoomMembershipChange has a content() method:
         self.0.content()
         // Or use whatever the actual accessor method is

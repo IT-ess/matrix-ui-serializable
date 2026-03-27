@@ -1,10 +1,11 @@
 use matrix_sdk::{
     Client,
     authentication::oauth::{
-        OAuthAuthorizationData, UrlOrQuery,
+        OAuthAuthorizationData,
         registration::{ApplicationType, ClientMetadata, Localized, OAuthGrantType},
     },
     ruma::serde::Raw,
+    utils::UrlOrQuery,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};

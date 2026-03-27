@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use matrix_sdk::{
     AuthSession, Client,
@@ -157,13 +157,19 @@ pub(crate) fn setup_token_background_save(updater: Arc<Box<dyn StateUpdater>>) {
         let client = CLIENT.wait();
         while let Ok(update) = client.subscribe_to_session_changes().recv().await {
             match update {
-                matrix_sdk::SessionChange::UnknownToken { soft_logout } => {
+                matrix_sdk::SessionChange::UnknownToken(s) => {
                     enqueue_toast_notification(ToastNotificationRequest::new(
-                        format!("This session is no longer valid. Error: {soft_logout}"),
+                        format!(
+                            "This session is no longer valid. Soft logout: {}",
+                            s.soft_logout
+                        ),
                         None,
                         ToastNotificationVariant::Error,
                     ));
-                    warn!("Received an unknown token error; soft logout? {soft_logout:?}");
+                    error!(
+                        "Received an unknown token error; soft logout? {}",
+                        s.soft_logout
+                    );
                 }
                 matrix_sdk::SessionChange::TokensRefreshed => {
                     // The tokens have been refreshed, persist them to disk.

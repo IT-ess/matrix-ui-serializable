@@ -14,7 +14,7 @@ use crate::{
     room::frontend_events::{
         msg_like::{FrontendStickerEventContent, SerializableReactions},
         state_event::{
-            FrontendAnyOtherFullStateEventContent, FrontendMemberProfileChange,
+            FrontendAnyOtherStateEventContentChange, FrontendMemberProfileChange,
             FrontendRoomMembershipChange, FrontendStateEvent,
         },
         thread_summary::get_frontend_thread_summary,
@@ -70,7 +70,7 @@ pub fn to_frontend_timeline_item(
     item: &Arc<TimelineItem>,
     room_id: Option<&OwnedRoomId>,
     user_power_levels: &UserPowerLevels,
-) -> FrontendTimelineItem {
+) -> Option<FrontendTimelineItem> {
     let unique_id = item.unique_id().0.clone();
     match item.kind() {
         TimelineItemKind::Event(event_tl_item) => {
@@ -97,7 +97,7 @@ pub fn to_frontend_timeline_item(
             )
         }
         TimelineItemKind::Virtual(event) => match event {
-            VirtualTimelineItem::DateDivider(timestamp) => FrontendTimelineItem {
+            VirtualTimelineItem::DateDivider(timestamp) => Some(FrontendTimelineItem {
                 unique_id,
                 event_id: None,
                 timeline_item_id: TimelineEventItemId::EventId(
@@ -109,8 +109,8 @@ pub fn to_frontend_timeline_item(
                 is_own: true,
                 timestamp: Some(timestamp.0),
                 abilities: MessageAbilities::empty(),
-            },
-            VirtualTimelineItem::ReadMarker => FrontendTimelineItem {
+            }),
+            VirtualTimelineItem::ReadMarker => Some(FrontendTimelineItem {
                 unique_id,
                 event_id: None,
                 timeline_item_id: TimelineEventItemId::EventId(
@@ -122,8 +122,8 @@ pub fn to_frontend_timeline_item(
                 is_own: true,
                 timestamp: None,
                 abilities: MessageAbilities::empty(),
-            },
-            VirtualTimelineItem::TimelineStart => FrontendTimelineItem {
+            }),
+            VirtualTimelineItem::TimelineStart => Some(FrontendTimelineItem {
                 unique_id,
                 event_id: None,
                 timeline_item_id: TimelineEventItemId::EventId(
@@ -135,7 +135,7 @@ pub fn to_frontend_timeline_item(
                 is_own: true,
                 timestamp: None,
                 abilities: MessageAbilities::empty(),
-            },
+            }),
         },
     }
 }
@@ -242,7 +242,7 @@ pub(super) fn map_timeline_event_item_content(
     sender_id: String,
     abilities: MessageAbilities,
     event_id: Option<OwnedEventId>,
-) -> FrontendTimelineItem {
+) -> Option<FrontendTimelineItem> {
     match timeline_item_content {
         TimelineItemContent::MsgLike(msg_like) => {
             let in_reply_to_id = msg_like.in_reply_to.clone().map(|r| r.event_id);
@@ -252,7 +252,7 @@ pub(super) fn map_timeline_event_item_content(
                 .clone()
                 .and_then(get_frontend_thread_summary);
             match msg_like.kind.clone() {
-                MsgLikeKind::Message(message) => FrontendTimelineItem {
+                MsgLikeKind::Message(message) => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -270,8 +270,8 @@ pub(super) fn map_timeline_event_item_content(
                         in_reply_to_id,
                         kind: map_msg_event_content(message.msgtype().clone()),
                     }),
-                },
-                MsgLikeKind::Sticker(sticker) => FrontendTimelineItem {
+                }),
+                MsgLikeKind::Sticker(sticker) => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -291,8 +291,8 @@ pub(super) fn map_timeline_event_item_content(
                             FrontendStickerEventContent::from(sticker.content().clone()),
                         )),
                     }),
-                },
-                MsgLikeKind::Redacted => FrontendTimelineItem {
+                }),
+                MsgLikeKind::Redacted => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -310,8 +310,8 @@ pub(super) fn map_timeline_event_item_content(
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Redacted,
                     }),
-                },
-                MsgLikeKind::UnableToDecrypt(_) => FrontendTimelineItem {
+                }),
+                MsgLikeKind::UnableToDecrypt(_) => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -329,9 +329,11 @@ pub(super) fn map_timeline_event_item_content(
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::UnableToDecrypt,
                     }),
-                },
+                }),
+                // TODO: map locations
+                MsgLikeKind::LiveLocation(_) => None,
 
-                MsgLikeKind::Poll(_) => FrontendTimelineItem {
+                MsgLikeKind::Poll(_) => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -349,9 +351,9 @@ pub(super) fn map_timeline_event_item_content(
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Poll,
                     }),
-                },
+                }),
 
-                MsgLikeKind::Other(_) => FrontendTimelineItem {
+                MsgLikeKind::Other(_) => Some(FrontendTimelineItem {
                     unique_id,
                     event_id,
                     timeline_item_id,
@@ -369,10 +371,10 @@ pub(super) fn map_timeline_event_item_content(
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Unknown,
                     }),
-                },
+                }),
             }
         }
-        TimelineItemContent::OtherState(state) => FrontendTimelineItem {
+        TimelineItemContent::OtherState(state) => Some(FrontendTimelineItem {
             unique_id,
             event_id,
             timeline_item_id,
@@ -381,10 +383,10 @@ pub(super) fn map_timeline_event_item_content(
             timestamp,
             abilities,
             data: FrontendTimelineItemData::StateChange(FrontendStateEvent::OtherState(
-                FrontendAnyOtherFullStateEventContent::from(state.content().clone()),
+                FrontendAnyOtherStateEventContentChange::from(state.content().clone()),
             )),
-        },
-        TimelineItemContent::MembershipChange(change) => FrontendTimelineItem {
+        }),
+        TimelineItemContent::MembershipChange(change) => Some(FrontendTimelineItem {
             unique_id,
             event_id,
             timeline_item_id,
@@ -395,9 +397,9 @@ pub(super) fn map_timeline_event_item_content(
             data: FrontendTimelineItemData::StateChange(FrontendStateEvent::MembershipChange(
                 FrontendRoomMembershipChange::from(change.clone()),
             )),
-        },
+        }),
 
-        TimelineItemContent::ProfileChange(change) => FrontendTimelineItem {
+        TimelineItemContent::ProfileChange(change) => Some(FrontendTimelineItem {
             unique_id,
             event_id,
             timeline_item_id,
@@ -408,10 +410,10 @@ pub(super) fn map_timeline_event_item_content(
             data: FrontendTimelineItemData::StateChange(FrontendStateEvent::ProfileChange(
                 FrontendMemberProfileChange::from(change.clone()),
             )),
-        },
+        }),
 
         TimelineItemContent::RtcNotification | TimelineItemContent::CallInvite => {
-            FrontendTimelineItem {
+            Some(FrontendTimelineItem {
                 unique_id,
                 event_id,
                 timeline_item_id,
@@ -420,13 +422,13 @@ pub(super) fn map_timeline_event_item_content(
                 timestamp,
                 abilities,
                 data: FrontendTimelineItemData::Call,
-            }
+            })
         }
 
         TimelineItemContent::FailedToParseMessageLike {
             event_type: _,
             error,
-        } => FrontendTimelineItem {
+        } => Some(FrontendTimelineItem {
             unique_id,
             event_id: None,
             timeline_item_id,
@@ -437,13 +439,13 @@ pub(super) fn map_timeline_event_item_content(
             is_own: true,
             timestamp: None,
             abilities,
-        },
+        }),
 
         TimelineItemContent::FailedToParseState {
             state_key: _,
             event_type: _,
             error,
-        } => FrontendTimelineItem {
+        } => Some(FrontendTimelineItem {
             unique_id,
             event_id: None,
             timeline_item_id,
@@ -454,6 +456,6 @@ pub(super) fn map_timeline_event_item_content(
             is_own: true,
             timestamp: None,
             abilities,
-        },
+        }),
     }
 }

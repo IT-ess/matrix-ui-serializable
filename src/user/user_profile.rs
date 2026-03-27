@@ -1,49 +1,37 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, btree_map::Entry},
-    sync::{Arc, LazyLock},
-};
+//! A cache of user profiles and room membership info, indexed by user ID.
+//!
+//! The cache is only accessible from the main UI thread.
 
 use crossbeam_queue::SegQueue;
 use matrix_sdk::{
     room::RoomMember,
-    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId},
+    ruma::{OwnedMxcUri, OwnedRoomId, OwnedUserId, UserId},
 };
 use serde::Serialize;
-use tokio::sync::RwLock;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry},
+};
+use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::{
-    models::{
-        async_requests::{MatrixRequest, submit_async_request},
-        events::{ToastNotificationRequest, ToastNotificationVariant},
-        state_updater::StateUpdater,
-    },
-    room::notifications::enqueue_toast_notification,
-};
+use crate::{MatrixRequest, commands::submit_async_request};
 
-use crate::init::singletons::{UIUpdateMessage, broadcast_event};
-
-/// Information retrieved about a user: their displayable name, ID, and known avatar state.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserProfile {
-    pub user_id: OwnedUserId,
-    /// The user's default display name, if set.
-    /// Note that a user may have per-room display names,
-    /// so this should be considered a fallback.
-    pub username: Option<String>,
-    pub avatar_url: Option<OwnedMxcUri>,
+thread_local! {
+    /// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
+    ///
+    /// To be of any use, this cache must only be accessed by the main UI thread.
+    static USER_PROFILE_CACHE: RefCell<BTreeMap<OwnedUserId, UserProfileCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
 }
-impl UserProfile {
-    /// Returns the user's displayable name, using the user ID as a fallback.
-    pub fn _displayable_name(&self) -> &str {
-        if let Some(un) = self.username.as_ref()
-            && !un.is_empty()
-        {
-            return un.as_str();
-        }
-        self.user_id.as_str()
-    }
+#[derive(Debug, Clone)]
+pub(crate) enum UserProfileCacheEntry {
+    /// A request has been issued and we're waiting for it to complete.
+    Requested,
+    /// The profile has been successfully loaded from the server.
+    Loaded {
+        user_profile: UserProfile,
+        rooms: BTreeMap<OwnedRoomId, RoomMember>,
+    },
 }
 
 /// The queue of user profile updates waiting to be processed by the UI thread's event handler.
@@ -52,7 +40,6 @@ static PENDING_USER_PROFILE_UPDATES: SegQueue<UserProfileUpdate> = SegQueue::new
 /// Enqueues a new user profile update and signals the UI that an update is available.
 pub fn enqueue_user_profile_update(update: UserProfileUpdate) {
     PENDING_USER_PROFILE_UPDATES.push(update);
-    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 /// A user profile update, which can include changes to a user's full profile
@@ -62,7 +49,7 @@ pub enum UserProfileUpdate {
     Full {
         new_profile: UserProfile,
         room_id: OwnedRoomId,
-        _room_member: RoomMember,
+        room_member: RoomMember,
     },
     /// An update to the user's room membership info only, without any profile changes.
     RoomMemberOnly {
@@ -72,24 +59,41 @@ pub enum UserProfileUpdate {
     /// An update to the user's profile only, without changes to room membership info.
     UserProfileOnly(UserProfile),
 }
-
 impl UserProfileUpdate {
+    /// Returns the user ID associated with this update.
+    #[allow(unused)]
+    pub fn user_id(&self) -> &UserId {
+        match self {
+            UserProfileUpdate::Full { new_profile, .. } => &new_profile.user_id,
+            UserProfileUpdate::RoomMemberOnly { room_member, .. } => room_member.user_id(),
+            UserProfileUpdate::UserProfileOnly(profile) => &profile.user_id,
+        }
+    }
+
+    pub fn get_user_profile_from_update(&self) -> Option<&UserProfile> {
+        match self {
+            UserProfileUpdate::Full { new_profile, .. } => Some(new_profile),
+            UserProfileUpdate::RoomMemberOnly { .. } => None,
+            UserProfileUpdate::UserProfileOnly(profile) => Some(profile),
+        }
+    }
+
     /// Applies this update to the given user profile info cache.
     fn apply_to_cache(self, cache: &mut BTreeMap<OwnedUserId, UserProfileCacheEntry>) {
         match self {
             UserProfileUpdate::Full {
                 new_profile,
                 room_id,
-                _room_member: _,
+                room_member,
             } => match cache.entry(new_profile.user_id.clone()) {
                 Entry::Occupied(mut entry) => match entry.get_mut() {
                     e @ UserProfileCacheEntry::Requested => {
                         *e = UserProfileCacheEntry::Loaded {
                             user_profile: new_profile,
                             rooms: {
-                                let mut rooms = BTreeSet::new();
-                                rooms.insert(room_id);
-                                rooms
+                                let mut room_members_map = BTreeMap::new();
+                                room_members_map.insert(room_id, room_member);
+                                room_members_map
                             },
                         };
                     }
@@ -98,16 +102,16 @@ impl UserProfileUpdate {
                         rooms,
                     } => {
                         *user_profile = new_profile;
-                        rooms.insert(room_id);
+                        rooms.insert(room_id, room_member);
                     }
                 },
                 Entry::Vacant(entry) => {
                     entry.insert(UserProfileCacheEntry::Loaded {
                         user_profile: new_profile,
                         rooms: {
-                            let mut rooms = BTreeSet::new();
-                            rooms.insert(room_id);
-                            rooms
+                            let mut room_members_map = BTreeMap::new();
+                            room_members_map.insert(room_id, room_member);
+                            room_members_map
                         },
                     });
                 }
@@ -128,17 +132,17 @@ impl UserProfileUpdate {
                                 user_profile: UserProfile {
                                     user_id: room_member.user_id().to_owned(),
                                     username: None,
-                                    avatar_url: room_member.avatar_url().map(|url| url.to_owned()),
+                                    avatar: room_member.avatar_url().map(|url| url.to_owned()),
                                 },
                                 rooms: {
-                                    let mut rooms = BTreeSet::new();
-                                    rooms.insert(room_id);
-                                    rooms
+                                    let mut room_members_map = BTreeMap::new();
+                                    room_members_map.insert(room_id, room_member);
+                                    room_members_map
                                 },
                             };
                         }
                         UserProfileCacheEntry::Loaded { rooms, .. } => {
-                            rooms.insert(room_id);
+                            rooms.insert(room_id, room_member);
                         }
                     },
                     Entry::Vacant(entry) => {
@@ -151,12 +155,12 @@ impl UserProfileUpdate {
                             user_profile: UserProfile {
                                 user_id: room_member.user_id().to_owned(),
                                 username: None,
-                                avatar_url: room_member.avatar_url().map(|url| url.to_owned()),
+                                avatar: room_member.avatar_url().map(|url| url.to_owned()),
                             },
                             rooms: {
-                                let mut rooms = BTreeSet::new();
-                                rooms.insert(room_id);
-                                rooms
+                                let mut room_members_map = BTreeMap::new();
+                                room_members_map.insert(room_id, room_member);
+                                room_members_map
                             },
                         });
                     }
@@ -168,7 +172,7 @@ impl UserProfileUpdate {
                         e @ UserProfileCacheEntry::Requested => {
                             *e = UserProfileCacheEntry::Loaded {
                                 user_profile: new_profile,
-                                rooms: BTreeSet::new(),
+                                rooms: BTreeMap::new(),
                             };
                         }
                         UserProfileCacheEntry::Loaded { user_profile, .. } => {
@@ -178,7 +182,7 @@ impl UserProfileUpdate {
                     Entry::Vacant(entry) => {
                         entry.insert(UserProfileCacheEntry::Loaded {
                             user_profile: new_profile,
-                            rooms: BTreeSet::new(),
+                            rooms: BTreeMap::new(),
                         });
                     }
                 }
@@ -187,72 +191,123 @@ impl UserProfileUpdate {
     }
 }
 
-/// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
-#[derive(Debug, Clone, Serialize)]
-pub struct UserProfileMap(BTreeMap<OwnedUserId, UserProfileCacheEntry>);
-
-/// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
-static USER_PROFILE_CACHE: LazyLock<RwLock<UserProfileMap>> =
-    LazyLock::new(|| RwLock::new(UserProfileMap(BTreeMap::new())));
-
 /// Processes all pending user profile updates in the queue.
-pub async fn process_user_profile_updates(updaters: &Arc<Box<dyn StateUpdater>>) -> bool {
-    let mut updated = false;
-    if PENDING_USER_PROFILE_UPDATES.is_empty() {
-        return updated; // Return early if the queue is empty to avoid acquiring the lock.
-    }
-    {
-        let mut lock = USER_PROFILE_CACHE.write().await;
+pub fn process_user_profile_updates() {
+    USER_PROFILE_CACHE.with_borrow_mut(|cache| {
         while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
             // Insert the updated info into the cache
-            update.apply_to_cache(&mut lock.0);
-            updated = true;
+            update.apply_to_cache(cache);
         }
-    } // We drop the write lock here
-    if updated {
-        let lock = USER_PROFILE_CACHE.read().await;
-        if let Err(e) = updaters.update_profile(&lock) {
-            enqueue_toast_notification(ToastNotificationRequest::new(
-                format!("Cannot update profiles store. Error: {e}"),
-                None,
-                ToastNotificationVariant::Error,
-            ))
-        }
-    }
-    updated
+    });
 }
 
-/// Submit a request to retrieve the user profile or returns true if the entry is already requested.
-pub async fn fetch_user_profile(user_id: OwnedUserId, room_id: Option<OwnedRoomId>) -> bool {
-    let mut lock = USER_PROFILE_CACHE.write().await;
-    match lock.0.entry(user_id) {
-        Entry::Occupied(_) => true,
+/// Invokes the given closure with cached user profile info for the given user ID
+/// (optionally in the given room) if it exists in the cache, otherwise does nothing.
+pub fn with_sender(
+    user_id: OwnedUserId,
+    room_id: Option<&OwnedRoomId>,
+    fetch_if_missing: bool,
+    sender: oneshot::Sender<Option<UserProfile>>,
+) {
+    USER_PROFILE_CACHE.with_borrow_mut(|cache| match cache.entry(user_id) {
+        Entry::Occupied(entry) => match entry.get() {
+            UserProfileCacheEntry::Loaded {
+                user_profile,
+                rooms,
+            } => {
+                if room_id.is_some_and(|id| !rooms.contains_key(id)) {
+                    submit_async_request(MatrixRequest::GetUserProfile {
+                        user_id: entry.key().clone(),
+                        room_id: room_id.cloned(),
+                        local_only: false,
+                        sender: None,
+                    });
+                }
+                let _ = sender.send(Some(user_profile.to_owned()));
+            }
+            UserProfileCacheEntry::Requested => {
+                // log!("User {} profile request is already in flight....", entry.key());
+            }
+        },
         Entry::Vacant(entry) => {
-            submit_async_request(MatrixRequest::GetUserProfile {
-                user_id: entry.key().clone(),
-                room_id,
-                local_only: false,
-            });
-            entry.insert(UserProfileCacheEntry::Requested);
-            false
+            if fetch_if_missing {
+                // log!("Did not find User {} in cache, fetching from server.", entry.key());
+                // TODO: use the extra `via` parameters from `matrix_to_uri.via()`.
+                submit_async_request(MatrixRequest::GetUserProfile {
+                    user_id: entry.key().clone(),
+                    room_id: room_id.cloned(),
+                    local_only: false,
+                    sender: Some(sender),
+                });
+                entry.insert(UserProfileCacheEntry::Requested);
+            }
+        }
+    })
+}
+
+/// A user's display name in our cache.
+pub enum CachedName {
+    /// The user's display name was found for the specified room (most accurate).
+    /// If `None`, they did not set a display name for that room.
+    FoundInRoom(Option<String>),
+    /// The user's display name was found in their general account profile.
+    /// If `None`, they have not set a display name at all.
+    FoundInProfile(Option<String>),
+    /// No info about the user was found in the cache.
+    NotFound,
+}
+impl CachedName {
+    pub fn was_found(&self) -> bool {
+        matches!(self, Self::FoundInRoom(_) | Self::FoundInProfile(_))
+    }
+
+    pub fn into_option(self) -> Option<String> {
+        self.into()
+    }
+
+    pub fn as_deref(&self) -> Option<&str> {
+        match self {
+            CachedName::FoundInRoom(name) | CachedName::FoundInProfile(name) => name.as_deref(),
+            CachedName::NotFound => None,
+        }
+    }
+}
+impl From<CachedName> for Option<String> {
+    fn from(cached_name: CachedName) -> Self {
+        match cached_name {
+            CachedName::FoundInRoom(name) => name,
+            CachedName::FoundInProfile(name) => name,
+            CachedName::NotFound => None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "state",
-    content = "data"
-)]
-enum UserProfileCacheEntry {
-    /// A request has been issued and we're waiting for it to complete.
-    Requested,
-    /// The profile has been successfully loaded from the server.
-    Loaded {
-        #[serde(flatten)]
-        user_profile: UserProfile,
-        rooms: BTreeSet<OwnedRoomId>,
-    },
+/// Clears cached user profile.
+pub fn _clear_user_profile_cache() {
+    // Clear user profile cache
+    USER_PROFILE_CACHE.with_borrow_mut(|cache| {
+        cache.clear();
+    });
+}
+
+/// Information retrieved about a user: their displayable name, ID, and known avatar state.
+#[derive(Clone, Debug, Serialize)]
+pub struct UserProfile {
+    pub user_id: OwnedUserId,
+    /// The user's default display name, if set.
+    /// Note that a user may have per-room display names,
+    /// so this should be considered a fallback.
+    pub username: Option<String>,
+    pub avatar: Option<OwnedMxcUri>,
+}
+impl UserProfile {
+    /// Returns the user's displayable name, using the user ID as a fallback.
+    pub fn displayable_name(&self) -> &str {
+        if let Some(un) = self.username.as_ref()
+            && !un.is_empty()
+        {
+            return un.as_str();
+        }
+        self.user_id.as_str()
+    }
 }
