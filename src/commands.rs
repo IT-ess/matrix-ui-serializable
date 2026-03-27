@@ -19,7 +19,7 @@ use crate::{
 use anyhow::anyhow;
 use mime::Mime;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 use url::Url;
 
 pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
