@@ -13,6 +13,7 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
+    user::user_profile::{UserProfile, with_user_profile},
     utils::guess_device_type,
 };
 use anyhow::anyhow;
@@ -57,12 +58,15 @@ pub fn submit_async_request(request: MatrixRequest) {
     crate::models::async_requests::submit_async_request(request);
 }
 
-/// Fetches a given User Profile and adds it to this lib's User Profile cache.
 pub async fn fetch_user_profile(
     user_id: OwnedUserId,
-    room_id: Option<OwnedRoomId>,
-) -> crate::Result<bool> {
-    Ok(crate::user::user_profile::fetch_user_profile(user_id, room_id).await)
+    room_id: Option<&OwnedRoomId>,
+) -> crate::Result<UserProfile> {
+    let (tx, rx) = oneshot::channel();
+    with_user_profile(user_id, room_id, true, move |profile: &UserProfile, _| {
+        let _ = tx.send(profile.to_owned());
+    });
+    Ok(rx.await.map_err(anyhow::Error::from)?)
 }
 
 /// Get the list of this user's account registered devices.

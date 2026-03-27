@@ -376,9 +376,6 @@ pub async fn async_worker(
             } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _fetch_task = Handle::current().spawn(async move {
-                    debug!("Sending get user profile request: user: {user_id}, \
-                        room: {room_id:?}, local_only: {local_only}...",
-                    );
 
                     let mut update = None;
 
@@ -394,10 +391,10 @@ pub async fn async_worker(
                                     new_profile: UserProfile {
                                         username: room_member.display_name().map(|u| u.to_owned()),
                                         user_id: user_id.clone(),
-                                        avatar_url: room_member.avatar_url().map(|u| u.to_owned()),
+                                        avatar: room_member.avatar_url().map(|u| u.to_owned()),
                                     },
                                     room_id: room_id.to_owned(),
-                                    _room_member: room_member,
+                                    room_member,
                                 });
                             } else {
                                 warn!("User profile request: user {user_id} was not a member of room {room_id}");
@@ -414,7 +411,9 @@ pub async fn async_worker(
                                     UserProfile {
                                         username: response.get_static::<DisplayName>().ok().flatten(),
                                         user_id: user_id.clone(),
-                                        avatar_url: response.get_static::<AvatarUrl>().ok().flatten(),
+                                        avatar: response.get_static::<AvatarUrl>()
+                                            .ok()
+                                            .unwrap_or_default(),
                                     }
                                 ));
                             } else {
@@ -425,7 +424,7 @@ pub async fn async_worker(
                         match update.as_mut() {
                             Some(UserProfileUpdate::Full { new_profile: UserProfile { username, .. }, .. }) if username.is_none() => {
                                 if let Ok(response) = client.account().fetch_user_profile_of(&user_id).await {
-                                   *username = response.get_static::<DisplayName>().ok().flatten();
+                                    *username = response.get_static::<DisplayName>().ok().flatten();
                                 }
                             }
                             _ => { }
@@ -1108,7 +1107,7 @@ pub async fn ui_worker(
                 let mut lock = rooms_list.lock().await;
                 lock.handle_rooms_list_updates().await;
 
-                process_user_profile_updates(&state_updaters).await; // Each time the UI is refreshed we check the profiles update queue.
+                process_user_profile_updates(); // Each time the UI is refreshed we check the profiles update queue.
 
                 let _ = process_toast_notifications().await;
             }
