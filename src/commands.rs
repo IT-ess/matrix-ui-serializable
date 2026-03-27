@@ -53,9 +53,8 @@ pub async fn check_homeserver_auth_type() -> crate::Result<FrontendAuthTypeRespo
 }
 
 /// Submit a request to the Matrix Client that will be executed asynchronously.
-pub fn submit_async_request(request: MatrixRequest) -> crate::Result<()> {
+pub fn submit_async_request(request: MatrixRequest) {
     crate::models::async_requests::submit_async_request(request);
-    Ok(())
 }
 
 /// Fetches a given User Profile and adds it to this lib's User Profile cache.
@@ -261,6 +260,21 @@ pub async fn define_room_informations(payload: EditRoomInformationPayload) -> cr
         room.set_room_topic(&topic).await?;
     }
     Ok(())
+}
+
+pub fn get_dm_room_id_or_create_it(user_id: OwnedUserId) -> Option<OwnedRoomId> {
+    let client = CLIENT.wait();
+    let res = client
+        .get_dm_room(&user_id)
+        .map(|room| room.room_id().to_owned());
+    if res.is_none() {
+        // If the room doesn't exist, then we send a request to create it.
+        // The room_id will be sent to front through an event.
+        crate::models::async_requests::submit_async_request(MatrixRequest::CreateDMRoom {
+            user_id,
+        });
+    }
+    res
 }
 
 pub async fn register_notifications(

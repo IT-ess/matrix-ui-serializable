@@ -927,40 +927,14 @@ pub async fn async_worker(
             }
             MatrixRequest::CreateDMRoom { user_id } => {
                 let Some(client) = CLIENT.get() else { continue };
-                // Do not create an extra if one already exists
-                if client.get_dm_room(&user_id).is_some() {
-                    enqueue_toast_notification(ToastNotificationRequest::new(
-                        format!("A DM room already exists for user {user_id}"),
-                        None,
-                        ToastNotificationVariant::Error,
-                    ));
-                    continue;
-                }
                 let _create_dm_room_task = Handle::current().spawn(async move {
-                    let mut request = create_room::v3::Request::new();
-                    request.is_direct = true;
-                    request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Private;
-                    request.invite = vec![user_id.clone()];
-                    request.preset = Some(create_room::v3::RoomPreset::TrustedPrivateChat);
-                    request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V12);
-
-                    match client.create_room(request).await {
+                    match client.create_dm(&user_id).await {
                         Ok(room) => {
+                            let event_bridge =
+                                get_event_bridge().expect("event bridge should be defined");
+                            event_bridge
+                                .emit(EmitEvent::NewlyCreatedRoomId(room.room_id().to_owned()));
                             info!("Sucessfully created DM room with user {user_id}");
-                            if let Err(e) = room.enable_encryption().await {
-                                enqueue_toast_notification(ToastNotificationRequest::new(
-                                    format!("Failed to enable encryption in Room. Error: {e}"),
-                                    None,
-                                    ToastNotificationVariant::Error,
-                                ))
-                            } else {
-                                info!("Enabled encryption for personal room");
-                                enqueue_toast_notification(ToastNotificationRequest::new(
-                                    format!("Sucessfully created DM room for user {user_id}"),
-                                    None,
-                                    ToastNotificationVariant::Success,
-                                ));
-                            }
                         }
                         Err(e) => {
                             error!(
