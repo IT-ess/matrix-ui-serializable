@@ -259,6 +259,9 @@ impl RoomScreen {
                 }
                 TimelineUpdate::RoomMembersListFetched { members } => {
                     debug!("RoomMembers list fetched !");
+                    // We clear the map before so we're sure there aren't
+                    // any members at previous membership state.
+                    self.members.clear();
                     members.iter().for_each(|member| {
                         self.members.insert(
                             member.user_id().to_owned(),

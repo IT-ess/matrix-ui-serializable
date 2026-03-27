@@ -1,11 +1,22 @@
 use anyhow::anyhow;
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, LazyLock, Mutex, OnceLock},
+    time::Duration,
+};
 
-use matrix_sdk::{Client, ruma::OwnedUserId};
+use matrix_sdk::{
+    Client, RoomMemberships,
+    ruma::{OwnedRoomId, OwnedUserId},
+};
 use matrix_sdk_ui::sync_service::SyncService;
-use tokio::sync::{
-    broadcast,
-    mpsc::{Receiver, UnboundedSender},
+use tokio::{
+    sync::{
+        broadcast,
+        mpsc::{Receiver, UnboundedSender},
+    },
+    time::{Instant, interval},
 };
 
 use crate::{
@@ -15,6 +26,7 @@ use crate::{
         event_bridge::EventBridge,
         events::{MatrixRoomStoreCreatedRequest, MatrixVerificationResponse},
     },
+    submit_async_request,
 };
 
 /// The sender used by [`submit_async_request`] to send requests to the async worker thread.
@@ -137,3 +149,65 @@ pub async fn get_verification_response_receiver_lock<'a>()
         .ok_or(anyhow!("The verification response receiver is not yet set"))?;
     Ok(recv.lock().await)
 }
+
+// Membership changes expiry Map.
+// Each time we receive a membership change from the Matrix sync
+// we add a RoomId in this map. After a debounced period of time,
+// this will send a request to update the members list.
+pub(crate) struct ExpiryMap {
+    // Stores the ID and the time it should expire
+    items: Arc<Mutex<HashMap<OwnedRoomId, Instant>>>,
+}
+
+impl ExpiryMap {
+    fn new() -> Self {
+        let items: Arc<Mutex<HashMap<OwnedRoomId, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+        let items_clone = Arc::clone(&items);
+
+        tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_millis(500));
+
+            loop {
+                ticker.tick().await;
+
+                let mut expired_ids = Vec::new();
+                let now = Instant::now();
+
+                {
+                    let mut map = items_clone.lock().unwrap();
+
+                    // .retain() is the most efficient way to remove items.
+                    // If the closure returns 'false', the item is removed.
+                    map.retain(|id, &mut expiry| {
+                        if now >= expiry {
+                            expired_ids.push(id.to_owned());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                }
+
+                for id in expired_ids {
+                    submit_async_request(MatrixRequest::GetRoomMembers {
+                        room_id: id,
+                        memberships: RoomMemberships::JOIN,
+                        // Important so we don't try to fetch too many
+                        // members from too large rooms.
+                        local_only: true,
+                    });
+                }
+            }
+        });
+
+        ExpiryMap { items }
+    }
+
+    pub(crate) fn insert(&self, id: OwnedRoomId, duration: Duration) {
+        let expiry = Instant::now() + duration;
+        self.items.lock().unwrap().insert(id, expiry);
+    }
+}
+
+pub(crate) static MEMBERSHIP_UPDATES_EXPIRY_MAP: LazyLock<ExpiryMap> =
+    LazyLock::new(ExpiryMap::new);

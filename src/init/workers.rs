@@ -251,7 +251,7 @@ pub async fn async_worker(
                     // Get room members details after the list sync.
                     submit_async_request(MatrixRequest::GetRoomMembers {
                         room_id,
-                        memberships: RoomMemberships::all(),
+                        memberships: RoomMemberships::JOIN,
                         local_only: false,
                     });
                     broadcast_event(UIUpdateMessage::RefreshUI);
