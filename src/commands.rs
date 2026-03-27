@@ -13,13 +13,13 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
-    user::user_profile::{UserProfile, with_user_profile},
+    user::user_profile::UserProfile,
     utils::guess_device_type,
 };
 use anyhow::anyhow;
 use mime::Mime;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use url::Url;
 
 pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
@@ -63,10 +63,11 @@ pub async fn fetch_user_profile(
     room_id: Option<&OwnedRoomId>,
 ) -> crate::Result<UserProfile> {
     let (tx, rx) = oneshot::channel();
-    with_user_profile(user_id, room_id, true, move |profile: &UserProfile, _| {
-        let _ = tx.send(profile.to_owned());
-    });
-    Ok(rx.await.map_err(anyhow::Error::from)?)
+    crate::user::user_profile::with_sender(user_id, room_id, true, tx);
+    Ok(rx
+        .await
+        .map_err(anyhow::Error::from)?
+        .ok_or(anyhow!("Update was room only. Cannot get user profile"))?)
 }
 
 /// Get the list of this user's account registered devices.

@@ -373,6 +373,7 @@ pub async fn async_worker(
                 user_id,
                 room_id,
                 local_only,
+                sender,
             } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _fetch_task = Handle::current().spawn(async move {
@@ -432,6 +433,9 @@ pub async fn async_worker(
                     }
 
                     if let Some(upd) = update {
+                        if let Some(sender) = sender {
+                         let _ = sender.send(upd.get_user_profile_from_update().cloned());
+                        }
                         debug!("Successfully completed get user profile request: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                         enqueue_user_profile_update(upd);
                     } else {

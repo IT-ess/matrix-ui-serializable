@@ -12,6 +12,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, btree_map::Entry},
 };
+use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::{MatrixRequest, commands::submit_async_request};
@@ -66,6 +67,14 @@ impl UserProfileUpdate {
             UserProfileUpdate::Full { new_profile, .. } => &new_profile.user_id,
             UserProfileUpdate::RoomMemberOnly { room_member, .. } => room_member.user_id(),
             UserProfileUpdate::UserProfileOnly(profile) => &profile.user_id,
+        }
+    }
+
+    pub fn get_user_profile_from_update(&self) -> Option<&UserProfile> {
+        match self {
+            UserProfileUpdate::Full { new_profile, .. } => Some(new_profile),
+            UserProfileUpdate::RoomMemberOnly { .. } => None,
+            UserProfileUpdate::UserProfileOnly(profile) => Some(profile),
         }
     }
 
@@ -194,15 +203,12 @@ pub fn process_user_profile_updates() {
 
 /// Invokes the given closure with cached user profile info for the given user ID
 /// (optionally in the given room) if it exists in the cache, otherwise does nothing.
-pub fn with_user_profile<F, R>(
+pub fn with_sender(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,
     fetch_if_missing: bool,
-    f: F,
-) -> Option<R>
-where
-    F: FnOnce(&UserProfile, &BTreeMap<OwnedRoomId, RoomMember>) -> R,
-{
+    sender: oneshot::Sender<Option<UserProfile>>,
+) {
     USER_PROFILE_CACHE.with_borrow_mut(|cache| match cache.entry(user_id) {
         Entry::Occupied(entry) => match entry.get() {
             UserProfileCacheEntry::Loaded {
@@ -214,13 +220,13 @@ where
                         user_id: entry.key().clone(),
                         room_id: room_id.cloned(),
                         local_only: false,
+                        sender: None,
                     });
                 }
-                Some(f(user_profile, rooms))
+                let _ = sender.send(Some(user_profile.to_owned()));
             }
             UserProfileCacheEntry::Requested => {
                 // log!("User {} profile request is already in flight....", entry.key());
-                None
             }
         },
         Entry::Vacant(entry) => {
@@ -231,32 +237,12 @@ where
                     user_id: entry.key().clone(),
                     room_id: room_id.cloned(),
                     local_only: false,
+                    sender: Some(sender),
                 });
                 entry.insert(UserProfileCacheEntry::Requested);
             }
-            None
         }
     })
-}
-
-/// Returns the given user's displayable name (optionally in the given room),
-/// using the user's account-wide displayable name as a fallback.
-///
-/// If either the `user_id` or `room_id` wasn't found in the cache,
-/// and if `fetch_if_missing` is true, then this function will submit a request
-/// to asynchronously fetch the user's room membership info from the server.
-pub fn _get_user_display_name_for_room(
-    user_id: OwnedUserId,
-    room_id: Option<&OwnedRoomId>,
-    fetch_if_missing: bool,
-) -> CachedName {
-    let opt = with_user_profile(user_id, room_id, fetch_if_missing, |profile, rooms| {
-        room_id.and_then(|id| rooms.get(id)).map_or_else(
-            || CachedName::FoundInProfile(profile.username.clone()),
-            |rm| CachedName::FoundInRoom(rm.display_name().map(|n| n.to_owned())),
-        )
-    });
-    opt.unwrap_or(CachedName::NotFound)
 }
 
 /// A user's display name in our cache.
