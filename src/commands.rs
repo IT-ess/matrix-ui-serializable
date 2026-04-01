@@ -30,7 +30,7 @@ use matrix_sdk::{
     encryption::CrossSigningResetAuthType,
     ruma::{
         DeviceId, OwnedMxcUri,
-        api::client::uiaa::{self, UserIdentifier},
+        api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
     },
 };
 
@@ -182,7 +182,9 @@ pub async fn reset_cross_signing(password: Option<String>) -> crate::Result<()> 
                     panic!("You should provide a password if you reset identity in Uiaa mode");
                 }
                 let mut password = uiaa::Password::new(
-                    UserIdentifier::UserIdOrLocalpart(client.user_id().unwrap().to_string()),
+                    UserIdentifier::Matrix(MatrixUserIdentifier::new(
+                        client.user_id().unwrap().to_string(),
+                    )),
                     password.unwrap(),
                 );
                 password.session = uiaa.session.clone();
