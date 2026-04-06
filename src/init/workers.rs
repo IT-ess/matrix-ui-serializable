@@ -666,7 +666,9 @@ pub async fn async_worker(
                 let _fetch_task = Handle::current().spawn(async move {
                     debug!("Sending fetch media request for {media_request:?}...");
                     let res = media.get_media_content(&media_request, true).await;
-                    let _ = content_sender.send(res);
+                    if let Err(e) = content_sender.send(res) {
+                        error!("Cannot send media content. {e:?}");
+                    };
                 });
             }
             MatrixRequest::SendMessage {

@@ -438,9 +438,14 @@ pub use user::user_profile::UserProfile;
 // The adapter needs some types in those modules
 pub use matrix_sdk::AuthSession;
 pub use matrix_sdk::encryption::recovery::RecoveryState;
-pub use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+pub use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
+pub use matrix_sdk::ruma::serde::base64::{Base64, Standard, UrlSafe};
 pub use matrix_sdk::ruma::{
-    OwnedDeviceId, OwnedMxcUri, OwnedRoomId, OwnedUserId, events::room::MediaSource,
+    OwnedDeviceId, OwnedMxcUri, OwnedRoomId, OwnedUserId, UInt,
+    events::room::{
+        EncryptedFile, EncryptedFileHashes, EncryptedFileInfo, MediaSource, V2EncryptedFileInfo,
+    },
+    media::Method,
 };
 pub use tokio::sync::mpsc;
 pub use tokio::sync::oneshot;
