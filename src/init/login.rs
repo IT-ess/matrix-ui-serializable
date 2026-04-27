@@ -1,13 +1,15 @@
+use anyhow::anyhow;
 use matrix_sdk::{
     Client, ThreadingSupport, config::RequestConfig, encryption::EncryptionSettings,
     sliding_sync::VersionBuilder,
 };
 
-use rand::{Rng, distr::Alphanumeric, rng};
+use rand::{RngExt, distr::Alphanumeric, rng};
 
 use crate::{
+    CLIENT,
     events::handlers::add_event_handlers,
-    init::singletons::{APP_DATA_DIR, TEMP_CLIENT_SESSION},
+    init::singletons::{APP_DATA_DIR, TEMP_CLIENT, TEMP_CLIENT_SESSION},
 };
 
 use super::session::ClientSession;
@@ -30,9 +32,24 @@ pub(crate) async fn login_and_persist_matrix_session(
         .expect("Should have session after login");
 
     let full = super::session::FullMatrixSession::new(
-        TEMP_CLIENT_SESSION.wait().clone(),
+        TEMP_CLIENT_SESSION
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(anyhow!("No temporary session has been set !"))?,
         matrix_sdk::AuthSession::Matrix(user_session),
     );
+
+    CLIENT
+        .set(
+            TEMP_CLIENT
+                .lock
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or(anyhow!("No temporary client was set !"))?,
+        )
+        .expect("Client already set !");
     let serialized = serde_json::to_string(&full)?;
 
     Ok(serialized)
@@ -96,7 +113,7 @@ pub async fn build_client(
         .build()
         .await?;
 
-    add_event_handlers(&client)?;
+    add_event_handlers(&client);
 
     let client_session = ClientSession::new(homeserver, db_identifier, passphrase);
 

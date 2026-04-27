@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use matrix_sdk::{
     Client,
     authentication::oauth::{
@@ -12,7 +13,8 @@ use tracing::{debug, error, info};
 use url::Url;
 
 use crate::{
-    init::singletons::{TEMP_CLIENT_SESSION, get_event_bridge},
+    CLIENT,
+    init::singletons::{TEMP_CLIENT, TEMP_CLIENT_SESSION, get_event_bridge},
     models::events::EmitEvent,
 };
 
@@ -101,9 +103,23 @@ pub(crate) async fn register_and_login_oauth(
         .expect("Should have session after login");
 
     let full = super::session::FullMatrixSession::new(
-        TEMP_CLIENT_SESSION.wait().clone(),
+        TEMP_CLIENT_SESSION
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(anyhow!("No temporary session has been set !"))?,
         matrix_sdk::AuthSession::OAuth(Box::new(user_session)),
     );
+    CLIENT
+        .set(
+            TEMP_CLIENT
+                .lock
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or(anyhow!("No temporary client was set !"))?,
+        )
+        .expect("Client already set !");
     let serialized = serde_json::to_string(&full)?;
 
     Ok(serialized)

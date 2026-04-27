@@ -24,7 +24,7 @@ use super::{
 };
 
 // These event handlers handle only the verification events. Other events are managed by the matrix_sdk_ui sync service.
-pub fn add_event_handlers(client: &Client) -> anyhow::Result<()> {
+pub fn add_event_handlers(client: &Client) {
     client.add_event_handler(
         |ev: ToDeviceKeyVerificationRequestEvent, client: Client| async move {
             if let Some(request) = client
@@ -78,8 +78,6 @@ pub fn add_event_handlers(client: &Client) -> anyhow::Result<()> {
         // from too large rooms we may haven't seen yet.
         MEMBERSHIP_UPDATES_EXPIRY_MAP.insert(room.room_id().to_owned(), Duration::from_millis(200));
     });
-
-    Ok(())
 }
 
 /// Returns the timestamp and text preview of the given `latest_event` timeline item.

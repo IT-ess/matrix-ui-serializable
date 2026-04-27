@@ -4,7 +4,9 @@ use crate::{
     FrontendVerificationState,
     init::{
         login::build_client,
-        singletons::{CLIENT, TEMP_CLIENT_SESSION, get_event_bridge},
+        singletons::{
+            CLIENT, HAS_SESSION_STORED, TEMP_CLIENT, TEMP_CLIENT_SESSION, get_event_bridge,
+        },
     },
     models::{
         async_requests::MatrixRequest,
@@ -38,19 +40,23 @@ use tokio::sync::oneshot;
 
 /// Try to build the client from the url given by the frontend and set its singleton.
 /// Once called, the client is set and the init process can proceed (by calling check_homeserver_auth_type)
-pub async fn build_client_from_homeserver_url(homeserver: String) -> crate::Result<()> {
+pub async fn build_temp_client_from_homeserver_url(homeserver: String) -> crate::Result<()> {
     let (client, client_session) = build_client(Some(homeserver), None).await?;
-    CLIENT.set(client).expect("Client already set");
-    TEMP_CLIENT_SESSION
-        .set(client_session)
-        .expect("Client session already set");
+    {
+        let mut temp_session = TEMP_CLIENT_SESSION.lock().unwrap();
+        *temp_session = Some(client_session);
+    }
+    {
+        let mut guard = TEMP_CLIENT.lock.lock().unwrap();
+        *guard = Some(client);
+    }
+    TEMP_CLIENT.cvar.notify_all();
     Ok(())
 }
 
 pub async fn check_homeserver_auth_type() -> crate::Result<FrontendAuthTypeResponse> {
-    crate::init::check_homeserver_auth_type()
-        .await
-        .map_err(|e| e.into())
+    let (auth_type, _) = crate::init::check_homeserver_auth_type().await?;
+    Ok(auth_type)
 }
 
 /// Submit a request to the Matrix Client that will be executed asynchronously.
@@ -161,10 +167,11 @@ pub async fn check_if_last_device() -> crate::Result<bool> {
 
 /// Check the login state
 pub fn is_logged_in() -> bool {
-    match CLIENT.get() {
-        Some(c) => c.is_active(),
-        None => false,
-    }
+    CLIENT.get().is_some()
+}
+
+pub fn has_session_stored() -> bool {
+    *HAS_SESSION_STORED.wait()
 }
 
 pub async fn reset_cross_signing(password: Option<String>) -> crate::Result<()> {

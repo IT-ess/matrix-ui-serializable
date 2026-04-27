@@ -13,7 +13,10 @@ use matrix_sdk::{
 use std::sync::Arc;
 
 use crate::{
-    init::{login::build_client, singletons::CLIENT},
+    init::{
+        login::build_client,
+        singletons::{CLIENT, HAS_SESSION_STORED},
+    },
     models::{
         events::{ToastNotificationRequest, ToastNotificationVariant},
         state_updater::StateUpdater,
@@ -138,8 +141,16 @@ pub async fn try_restore_session_to_state(
     session_option: Option<String>,
 ) -> crate::Result<Option<Client>> {
     match session_option {
-        None => Ok(None),
+        None => {
+            HAS_SESSION_STORED
+                .set(false)
+                .map_err(|b| anyhow!("HAS_SESSION_STORED was already defined. {b}"))?;
+            Ok(None)
+        }
         Some(session_string) => {
+            HAS_SESSION_STORED
+                .set(true)
+                .map_err(|b| anyhow!("HAS_SESSION_STORED was already defined. {b}"))?;
             let session: FullMatrixSession =
                 serde_json::from_str(&session_string).map_err(|e| anyhow!(e))?;
             let initial_client = restore_client_from_session(session).await?;

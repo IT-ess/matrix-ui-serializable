@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, LazyLock, Mutex, OnceLock},
+    sync::{Arc, Condvar, LazyLock, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -40,21 +40,32 @@ pub static SYNC_SERVICE: OnceLock<SyncService> = OnceLock::new();
 /// if rooms have been synced or not.
 pub static ALL_ROOMS_LOADED: OnceLock<bool> = OnceLock::new();
 
+pub(crate) struct TempClientSlot {
+    pub(crate) lock: Mutex<Option<Client>>,
+    pub(crate) cvar: Condvar,
+}
+
+/// The temporary Client used during login. It can be mutated
+/// because the user can change its homeserver.
+pub static TEMP_CLIENT: LazyLock<TempClientSlot> = LazyLock::new(|| TempClientSlot {
+    lock: Mutex::new(None),
+    cvar: Condvar::new(),
+});
+
 /// The temporary Client Session used during login
-pub static TEMP_CLIENT_SESSION: OnceLock<ClientSession> = OnceLock::new();
+pub static TEMP_CLIENT_SESSION: LazyLock<Mutex<Option<ClientSession>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// The logged-in Matrix client, which can be freely and cheaply cloned.
 pub static CLIENT: OnceLock<Client> = OnceLock::new();
-
-pub fn get_cloned_client() -> Option<Client> {
-    CLIENT.get().cloned()
-}
 
 /// The current User's ID
 pub static CURRENT_USER_ID: OnceLock<OwnedUserId> = OnceLock::new();
 
 /// Flag to be set once the frontend Login Store is up and ready
 pub static LOGIN_STORE_READY: OnceLock<bool> = OnceLock::new();
+
+pub static HAS_SESSION_STORED: OnceLock<bool> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub enum UIUpdateMessage {

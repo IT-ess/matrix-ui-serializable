@@ -1,5 +1,5 @@
 #![recursion_limit = "256"]
-use std::{path::PathBuf, sync::Arc, thread, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use serde::{Serialize, ser::Serializer};
@@ -16,7 +16,7 @@ use crate::{
         session::{setup_token_background_save, try_restore_session_to_state},
         singletons::{
             APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER,
-            VERIFICATION_RESPONSE_RECEIVER, get_cloned_client,
+            VERIFICATION_RESPONSE_RECEIVER,
         },
         workers::{async_main_loop, async_worker},
     },
@@ -175,10 +175,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
         let updaters_arc = Arc::new(config.updaters);
         let inner_updaters = updaters_arc.clone();
 
-        // Wait for frontend to be ready before proceeding with the init.
-        LOGIN_STORE_READY.wait();
-        info!("FRONTEND IS READY");
-        // Setup the token refresher thread
+        // Setup the token refresher thread before first sync or client build.
         setup_token_background_save(inner_updaters.clone());
         let matrix_request_receiver = basic_init_handle.await.expect("couldn't do basic init");
 
@@ -209,10 +206,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                 (restored, true)
             }
             None => {
-                // Block the thread for 1 sec to let the frontend init itself.
-                // Note: that's a shitty way to handle a race condition, but otherwise the
-                // Svelte Login store doesn't receive the updates.
-                thread::sleep(Duration::from_secs(1));
+                LOGIN_STORE_READY.wait();
                 if let Err(e) =
                     &inner_updaters.update_login_state(LoginState::AwaitingForHomeserver, None)
                 {
@@ -224,9 +218,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                 }
                 info!("Waiting for homeserver selection...");
 
-                let client = if let Ok(auth_type) = check_homeserver_auth_type().await {
-                    let client =
-                        get_cloned_client().expect("client should be defined at this point");
+                let client = if let Ok((auth_type, client)) = check_homeserver_auth_type().await {
                     let serialized_session = match auth_type {
                         FrontendAuthTypeResponse::Oauth => init::oauth::register_and_login_oauth(
                             &client,
@@ -279,17 +271,6 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
                     panic!("Unknown homeserver auth type")
                 };
 
-                // Update frontend login state
-                if let Err(e) = &inner_updaters.update_login_state(
-                    LoginState::LoggedIn,
-                    client.user_id().map(|v| v.to_string()),
-                ) {
-                    enqueue_toast_notification(ToastNotificationRequest::new(
-                        format!("Cannot update login state. Error: {e}"),
-                        None,
-                        ToastNotificationVariant::Error,
-                    ))
-                }
                 (client, false)
             }
         };
@@ -315,13 +296,26 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
             .and_then(|d| d.display_name().map(|s| s.to_owned()));
 
         if let Err(e) = inner_updaters.update_current_user_info(
-            Some(client.user_id().unwrap().to_owned()),
+            Some(CURRENT_USER_ID.get().unwrap().to_owned()),
             user_avatar,
             user_display_name,
             device_name,
         ) {
             enqueue_toast_notification(ToastNotificationRequest::new(
                 format!("Cannot update current user info. Error: {e}"),
+                None,
+                ToastNotificationVariant::Error,
+            ))
+        }
+
+        // Update frontend login state
+        if let Err(e) = &inner_updaters.update_login_state(
+            LoginState::LoggedIn,
+            CURRENT_USER_ID.get().map(|u| u.to_string()),
+        ) {
+            error!("Cannot update frontend login store. {e}");
+            enqueue_toast_notification(ToastNotificationRequest::new(
+                format!("Cannot update login state. Error: {e}"),
                 None,
                 ToastNotificationVariant::Error,
             ))
@@ -366,6 +360,8 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
             updaters_arc,
             config.event_receivers.room_update_receiver,
         ));
+
+        LOGIN_STORE_READY.wait();
 
         #[allow(clippy::never_loop)] // unsure if needed, just following tokio's examples.
         loop {
@@ -429,7 +425,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 // Re-exports
 
 pub use init::session::FullMatrixSession;
-pub use init::singletons::LOGIN_STORE_READY;
+pub use init::singletons::{CLIENT, LOGIN_STORE_READY};
 pub use models::async_requests::*;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
