@@ -144,7 +144,7 @@ pub fn text_preview_of_timeline_item(
             String::from("[Call Invitation]"),
             BeforeText::UsernameWithColon,
         )),
-        TimelineItemContent::RtcNotification => TextPreview::from((
+        TimelineItemContent::RtcNotification { .. } => TextPreview::from((
             String::from("[Call Notification]"),
             BeforeText::UsernameWithColon,
         )),
@@ -215,7 +215,7 @@ pub fn _plaintext_body_of_timeline_item(event_tl_item: &EventTimelineItem) -> St
             )
         }
         TimelineItemContent::CallInvite => String::from("[Call Invitation]"),
-        TimelineItemContent::RtcNotification => String::from("[Call Notification]"),
+        TimelineItemContent::RtcNotification { .. } => String::from("[Call Notification]"),
     }
 }
 
@@ -313,21 +313,6 @@ pub fn text_preview_of_other_state(
     format_as_html: bool,
 ) -> Option<TextPreview> {
     let text = match other_state.content() {
-        AnyOtherStateEventContentChange::RoomAliases(StateEventContentChange::Original {
-            content,
-            ..
-        }) => {
-            let mut s = String::from("set this room's aliases to ");
-            let last_alias = content.aliases.len() - 1;
-            for (i, alias) in content.aliases.iter().enumerate() {
-                s.push_str(alias.as_str());
-                if i != last_alias {
-                    s.push_str(", ");
-                }
-            }
-            s.push('.');
-            Some(s)
-        }
         AnyOtherStateEventContentChange::RoomAvatar(_) => {
             Some(String::from("set this room's avatar picture."))
         }

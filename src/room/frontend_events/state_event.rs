@@ -9,7 +9,6 @@ use matrix_sdk::ruma::events::StaticStateEventContent;
 use matrix_sdk::ruma::events::policy::rule::room::PolicyRuleRoomEventContent;
 use matrix_sdk::ruma::events::policy::rule::server::PolicyRuleServerEventContent;
 use matrix_sdk::ruma::events::policy::rule::user::PolicyRuleUserEventContent;
-use matrix_sdk::ruma::events::room::aliases::RoomAliasesEventContent;
 use matrix_sdk::ruma::events::room::avatar::RoomAvatarEventContent;
 use matrix_sdk::ruma::events::room::canonical_alias::RoomCanonicalAliasEventContent;
 use matrix_sdk::ruma::events::room::create::RoomCreateEventContent;
@@ -162,9 +161,6 @@ enum FrontendAnyOtherStateEventContentChangeEnum {
     /// m.policy.rule.user
     PolicyRuleUser(FrontendStateEventContentChange<PolicyRuleUserEventContent>),
 
-    /// m.room.aliases
-    RoomAliases(FrontendStateEventContentChange<RoomAliasesEventContent>),
-
     /// m.room.avatar
     RoomAvatar(FrontendStateEventContentChange<RoomAvatarEventContent>),
 
@@ -235,9 +231,6 @@ impl Serialize for FrontendAnyOtherStateEventContentChange {
             }
             AnyOtherStateEventContentChange::PolicyRuleUser(content) => {
                 FrontendAnyOtherStateEventContentChangeEnum::PolicyRuleUser(content.clone().into())
-            }
-            AnyOtherStateEventContentChange::RoomAliases(content) => {
-                FrontendAnyOtherStateEventContentChangeEnum::RoomAliases(content.clone().into())
             }
             AnyOtherStateEventContentChange::RoomAvatar(content) => {
                 FrontendAnyOtherStateEventContentChangeEnum::RoomAvatar(content.clone().into())

@@ -128,19 +128,16 @@ pub fn ends_with_href(text: &str) -> bool {
     let mut substr = text.trim_end();
     // Search backwards for a single quote, double quote, or an equals sign.
     match substr.as_bytes().last() {
-        Some(b'\'' | b'"') => {
+        Some(b'\'' | b'"')
             if substr
                 .get(..substr.len().saturating_sub(1))
                 .map(|s| {
                     substr = s.trim_end();
                     substr.as_bytes().last() == Some(&b'=')
                 })
-                .unwrap_or(false)
-            {
-                substr = &substr[..substr.len().saturating_sub(1)];
-            } else {
-                return false;
-            }
+                .unwrap_or(false) =>
+        {
+            substr = &substr[..substr.len().saturating_sub(1)];
         }
         Some(b'=') => {
             substr = &substr[..substr.len().saturating_sub(1)];

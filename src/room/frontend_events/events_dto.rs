@@ -412,7 +412,7 @@ pub(super) fn map_timeline_event_item_content(
             )),
         }),
 
-        TimelineItemContent::RtcNotification | TimelineItemContent::CallInvite => {
+        TimelineItemContent::RtcNotification { .. } | TimelineItemContent::CallInvite => {
             Some(FrontendTimelineItem {
                 unique_id,
                 event_id,
