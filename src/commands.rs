@@ -2,10 +2,12 @@
 
 use crate::{
     FrontendVerificationState,
+    events::timeline::TimelineKind,
     init::{
         login::build_client,
         singletons::{
-            CLIENT, HAS_SESSION_STORED, TEMP_CLIENT, TEMP_CLIENT_SESSION, get_event_bridge,
+            CLIENT, CURRENT_USER_ID, HAS_SESSION_STORED, TEMP_CLIENT, TEMP_CLIENT_SESSION,
+            get_event_bridge,
         },
     },
     models::{
@@ -14,12 +16,17 @@ use crate::{
         misc::{EditRoomInformationPayload, EditUserInformationPayload},
         state_updater::StateUpdater,
     },
-    room::rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
-    user::user_profile::UserProfile,
+    room::{
+        frontend_events::events_dto::{FrontendTimelineItem, map_event_timeline_item},
+        joined_room::get_timeline,
+        rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
+    },
+    user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
     utils::guess_device_type,
 };
 use anyhow::anyhow;
 use mime::Mime;
+use rand::{RngExt, distr::Alphanumeric, rng};
 use std::sync::Arc;
 use tracing::info;
 use url::Url;
@@ -289,6 +296,35 @@ pub fn get_dm_room_id_or_create_it(user_id: OwnedUserId) -> Option<OwnedRoomId> 
         });
     }
     res
+}
+
+pub async fn get_event_from_main_timeline(
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+) -> crate::Result<FrontendTimelineItem> {
+    let kind = TimelineKind::MainRoom { room_id };
+    let timeline = get_timeline(&kind).ok_or(anyhow!("Cannot get timeline"))?;
+
+    let pl = timeline.room().power_levels_or_default().await;
+
+    let event = timeline
+        .item_by_event_id(&event_id)
+        .await
+        .ok_or(anyhow!("Event not found"))?;
+
+    let unique_id: String = rng()
+        .sample_iter(Alphanumeric)
+        .take(7)
+        .map(char::from)
+        .collect();
+
+    Ok(map_event_timeline_item(
+        unique_id,
+        &event,
+        &kind,
+        &UserPowerLevels::from(&pl, CURRENT_USER_ID.get().unwrap()),
+    )
+    .ok_or(anyhow!("This item cannot be mapped to a frontend struct"))?)
 }
 
 pub async fn register_notifications(
