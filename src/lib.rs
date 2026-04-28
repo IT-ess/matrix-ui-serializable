@@ -418,6 +418,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 pub use init::session::FullMatrixSession;
 pub use init::singletons::{CLIENT, LOGIN_STORE_READY};
 pub use models::async_requests::*;
+pub use room::frontend_events::events_dto::FrontendTimelineItem;
 pub use room::room_screen::RoomScreen;
 pub use room::rooms_list::RoomsList;
 pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationState, LoginState};

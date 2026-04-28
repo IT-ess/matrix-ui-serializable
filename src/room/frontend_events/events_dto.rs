@@ -73,30 +73,7 @@ pub fn to_frontend_timeline_item(
     let unique_id = item.unique_id().0.clone();
     match item.kind() {
         TimelineItemKind::Event(event_tl_item) => {
-            let timeline_item_id: FrontendTimelineEventItemId = event_tl_item.identifier().into();
-            let is_own = event_tl_item.is_own();
-            let is_local = event_tl_item.is_local_echo();
-            let timestamp = Some(event_tl_item.timestamp().get());
-            let sender = Some(get_or_fetch_event_sender(
-                event_tl_item,
-                Some(timeline_kind.clone()),
-            ));
-            let sender_id = event_tl_item.sender().to_string();
-            let abilities =
-                MessageAbilities::from_user_power_and_event(user_power_levels, event_tl_item);
-            let event_id = event_tl_item.event_id().map(|id| id.to_owned());
-            map_timeline_event_item_content(
-                event_tl_item.content(),
-                unique_id,
-                timeline_item_id,
-                is_own,
-                is_local,
-                timestamp,
-                sender,
-                sender_id,
-                abilities,
-                event_id,
-            )
+            map_event_timeline_item(unique_id, event_tl_item, timeline_kind, user_power_levels)
         }
         TimelineItemKind::Virtual(event) => match event {
             VirtualTimelineItem::DateDivider(timestamp) => Some(FrontendTimelineItem {
@@ -230,6 +207,34 @@ impl Serialize for MessageAbilities {
 
         seq.end()
     }
+}
+
+pub(crate) fn map_event_timeline_item(
+    unique_id: String,
+    event_tl_item: &EventTimelineItem,
+    kind: &TimelineKind,
+    user_power_levels: &UserPowerLevels,
+) -> Option<FrontendTimelineItem> {
+    let timeline_item_id: FrontendTimelineEventItemId = event_tl_item.identifier().into();
+    let is_own = event_tl_item.is_own();
+    let is_local = event_tl_item.is_local_echo();
+    let timestamp = Some(event_tl_item.timestamp().get());
+    let sender = Some(get_or_fetch_event_sender(event_tl_item, Some(kind.clone())));
+    let sender_id = event_tl_item.sender().to_string();
+    let abilities = MessageAbilities::from_user_power_and_event(user_power_levels, event_tl_item);
+    let event_id = event_tl_item.event_id().map(|id| id.to_owned());
+    map_timeline_event_item_content(
+        event_tl_item.content(),
+        unique_id,
+        timeline_item_id,
+        is_own,
+        is_local,
+        timestamp,
+        sender,
+        sender_id,
+        abilities,
+        event_id,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
