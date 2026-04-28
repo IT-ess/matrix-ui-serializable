@@ -59,6 +59,7 @@ pub enum MatrixRequest {
     CreateThreadTimeline {
         room_id: OwnedRoomId,
         thread_root_event_id: OwnedEventId,
+        sender: oneshot::Sender<()>,
     },
     /// Request to fetch profile information for all members of a room.
     /// This can be *very* slow depending on the number of members in the room.

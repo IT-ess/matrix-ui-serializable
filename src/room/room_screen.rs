@@ -8,6 +8,7 @@ use matrix_sdk::{
 };
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
+use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
 
 use crate::{
@@ -363,22 +364,32 @@ impl RoomScreen {
         let (tl_state, first_time_showing_room) = if let Some(existing) = state_opt {
             (existing, false)
         } else {
-            let Some(timeline_endpoints) = take_timeline_endpoints(&kind) else {
-                if let Some(thread_root_event_id) = kind.thread_root_event_id() {
+            // This part differs a bit from robrix. Here we wait for
+            // the thread timeline to be built before proceeding.
+            let timeline_endpoints = match take_timeline_endpoints(&kind) {
+                Some(te) => te,
+                None if let Some(thread_root) = kind.thread_root_event_id() => {
+                    let (tx, rx) = oneshot::channel();
                     submit_async_request(MatrixRequest::CreateThreadTimeline {
                         room_id: room_id.clone(),
-                        thread_root_event_id: thread_root_event_id.clone(),
+                        thread_root_event_id: thread_root.clone(),
+                        sender: tx,
                     });
-                    return;
+                    match futures::executor::block_on(rx) {
+                        Ok(_) => take_timeline_endpoints(&kind).expect("msg"),
+                        Err(e) => {
+                            warn!("Timeline hasn't been created. {e}");
+                            return;
+                        }
+                    }
                 }
-                if !self.is_loaded && self.all_rooms_loaded {
-                    panic!(
-                        "BUG: timeline {kind} is not loaded, but its RoomScreen \
-                    was not waiting for its timeline to be loaded either."
-                    );
-                }
-                return;
+                None if !self.is_loaded && self.all_rooms_loaded => panic!(
+                    "BUG: timeline {kind} is not loaded, but its RoomScreen \
+                        was not waiting for its timeline to be loaded either."
+                ),
+                None => return,
             };
+
             let TimelineEndpoints {
                 update_receiver,
                 _update_sender: _,

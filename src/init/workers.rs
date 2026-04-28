@@ -185,6 +185,7 @@ pub async fn async_worker(
             MatrixRequest::CreateThreadTimeline {
                 room_id,
                 thread_root_event_id,
+                sender,
             } => {
                 let main_room_timeline = {
                     let Some(arc) = crate::room::joined_room::try_get_room_details(&room_id) else {
@@ -254,6 +255,7 @@ pub async fn async_worker(
                                     timeline_subscriber_handler_task,
                                 },
                             );
+                            let _ = sender.send(());
                             broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         Err(error) => {
