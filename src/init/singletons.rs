@@ -20,11 +20,11 @@ use tokio::{
 };
 
 use crate::{
+    events::timeline::TimelineKind,
     init::session::ClientSession,
     models::{
-        async_requests::MatrixRequest,
-        event_bridge::EventBridge,
-        events::{MatrixRoomStoreCreatedRequest, MatrixVerificationResponse},
+        async_requests::MatrixRequest, event_bridge::EventBridge,
+        events::MatrixVerificationResponse,
     },
     submit_async_request,
 };
@@ -137,18 +137,6 @@ pub fn get_event_bridge<'a>() -> anyhow::Result<&'a EventBridge> {
 
 // Adapter -> lib communication
 
-pub static ROOM_CREATED_RECEIVER: OnceLock<
-    tokio::sync::Mutex<Receiver<MatrixRoomStoreCreatedRequest>>,
-> = OnceLock::new();
-
-pub async fn get_room_created_receiver_lock<'a>()
--> anyhow::Result<tokio::sync::MutexGuard<'a, Receiver<MatrixRoomStoreCreatedRequest>>> {
-    let recv = ROOM_CREATED_RECEIVER
-        .get()
-        .ok_or(anyhow!("The room created receiver is not yet set"))?;
-    Ok(recv.lock().await)
-}
-
 pub static VERIFICATION_RESPONSE_RECEIVER: OnceLock<
     tokio::sync::Mutex<Receiver<MatrixVerificationResponse>>,
 > = OnceLock::new();
@@ -201,7 +189,7 @@ impl ExpiryMap {
 
                 for id in expired_ids {
                     submit_async_request(MatrixRequest::GetRoomMembers {
-                        room_id: id,
+                        timeline_kind: TimelineKind::MainRoom { room_id: id },
                         memberships: RoomMemberships::JOIN,
                         // Important so we don't try to fetch too many
                         // members from too large rooms.

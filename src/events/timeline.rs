@@ -1,12 +1,12 @@
 use std::{
     cmp::{max, min},
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
+    collections::HashMap,
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use futures::StreamExt;
 use matrix_sdk::{
-    Room,
+    Room, SuccessorRoom,
     room::RoomMember,
     ruma::{OwnedEventId, OwnedRoomId, events::receipt::Receipt},
 };
@@ -18,7 +18,7 @@ use matrix_sdk_ui::{
     },
 };
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
-use tokio::sync::watch;
+use tokio::{sync::watch, task::JoinHandle};
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -123,7 +123,7 @@ pub enum TimelineUpdate {
     },
     /// The result of a request to edit a message in this timeline.
     MessageEdited {
-        timeline_event_id: TimelineEventItemId,
+        timeline_event_item_id: TimelineEventItemId,
         result: Result<(), timeline::Error>,
     },
     /// A notice that the room's members have been fetched from the server,
@@ -150,8 +150,8 @@ pub enum TimelineUpdate {
 }
 
 /// The global set of all timeline states, one entry per room.
-pub static TIMELINE_STATES: Mutex<BTreeMap<OwnedRoomId, TimelineUiState>> =
-    Mutex::new(BTreeMap::new());
+pub static TIMELINE_STATES: LazyLock<Mutex<HashMap<TimelineKind, TimelineUiState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The UI-side state of a single room's timeline, which is only accessed/updated by the UI thread.
 ///
@@ -161,8 +161,8 @@ pub static TIMELINE_STATES: Mutex<BTreeMap<OwnedRoomId, TimelineUiState>> =
 /// then it should be stored in the RoomScreen widget itself, not in this struct.
 #[derive(Debug)]
 pub struct TimelineUiState {
-    /// The ID of the room that this timeline is for.
-    pub(crate) room_id: OwnedRoomId,
+    /// Info determining whether this is a main room timeline is a thread-focused timeline.
+    pub(crate) kind: TimelineKind,
 
     /// The power levels of the currently logged-in user in this room.
     // The TS type corresponds to how power levels are serialized in frontend.
@@ -210,57 +210,84 @@ impl Serialize for TimelineUiState {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("TimelineUiState", 6)?;
+        match self.kind {
+            TimelineKind::MainRoom { ref room_id } => {
+                let mut state = serializer.serialize_struct("TimelineUiState", 7)?;
 
-        state.serialize_field("roomId", &self.room_id)?;
-        state.serialize_field("userPower", &self.user_power)?;
-        state.serialize_field("fullyPaginated", &self.fully_paginated)?;
-        state.serialize_field(
-            "items",
-            &serialize_timeline_items(&self.items, &self.room_id, &self.user_power),
-        )?;
-        state.serialize_field("scrolledPastReadMarker", &self.scrolled_past_read_marker)?;
-        state.serialize_field("latestOwnUserReceipt", &self.latest_own_user_receipt)?;
+                state.serialize_field("timelineKind", "mainRoom")?;
+                state.serialize_field("roomId", room_id)?;
+                state.serialize_field("userPower", &self.user_power)?;
+                state.serialize_field("fullyPaginated", &self.fully_paginated)?;
+                state.serialize_field(
+                    "items",
+                    &serialize_timeline_items(&self.items, &self.kind, &self.user_power),
+                )?;
+                state.serialize_field("scrolledPastReadMarker", &self.scrolled_past_read_marker)?;
+                state.serialize_field("latestOwnUserReceipt", &self.latest_own_user_receipt)?;
 
-        state.end()
+                state.end()
+            }
+            TimelineKind::Thread {
+                ref room_id,
+                ref thread_root_event_id,
+            } => {
+                let mut state = serializer.serialize_struct("TimelineUiState", 8)?;
+
+                state.serialize_field("timelineKind", "thread")?;
+                state.serialize_field("roomId", room_id)?;
+                state.serialize_field("threadRootEventId", thread_root_event_id)?;
+                state.serialize_field("userPower", &self.user_power)?;
+                state.serialize_field("fullyPaginated", &self.fully_paginated)?;
+                state.serialize_field(
+                    "items",
+                    &serialize_timeline_items(&self.items, &self.kind, &self.user_power),
+                )?;
+                state.serialize_field("scrolledPastReadMarker", &self.scrolled_past_read_marker)?;
+                state.serialize_field("latestOwnUserReceipt", &self.latest_own_user_receipt)?;
+
+                state.end()
+            }
+        }
     }
 }
 fn serialize_timeline_items(
     items: &Vector<Arc<TimelineItem>>,
-    room_id: &OwnedRoomId,
+    timeline_kind: &TimelineKind,
     user_power_levels: &UserPowerLevels,
 ) -> Vec<FrontendTimelineItem> {
     items
         .iter()
-        .filter_map(|item| to_frontend_timeline_item(item, Some(room_id), user_power_levels))
+        .filter_map(|item| to_frontend_timeline_item(item, timeline_kind, user_power_levels))
         .collect()
 }
 
-/// Returns three channel endpoints related to the timeline for the given joined room.
+/// Returns three channel endpoints related to the timeline for the given joined room or thread.
 ///
 /// 1. A timeline update sender.
 /// 2. The timeline update receiver, which is a singleton, and can only be taken once.
 /// 3. A `tokio::watch` sender that can be used to send requests to the timeline subscriber handler.
 ///
-/// This will only succeed once per room, as only a single channel receiver can exist.
-pub fn take_timeline_endpoints(
-    room_id: &OwnedRoomId,
-) -> Option<(
-    crossbeam_channel::Sender<TimelineUpdate>,
-    crossbeam_channel::Receiver<TimelineUpdate>,
-    TimelineRequestSender,
-)> {
-    crate::room::joined_room::try_get_room_details(room_id).and_then(|ri| {
+/// This will only succeed once per room (or once per room thread),
+/// as only a single channel receiver can exist.
+pub fn take_timeline_endpoints(kind: &TimelineKind) -> Option<TimelineEndpoints> {
+    crate::room::joined_room::try_get_room_details(kind.room_id()).and_then(|ri| {
         let mut lock = ri.lock().unwrap();
-        lock.timeline_singleton_endpoints
-            .take()
-            .map(|(receiver, request_sender)| {
-                (
-                    lock.timeline_update_sender.clone(),
-                    receiver,
-                    request_sender,
-                )
-            })
+
+        let details = match kind {
+            TimelineKind::MainRoom { .. } => &mut lock.main_timeline,
+            TimelineKind::Thread {
+                thread_root_event_id,
+                ..
+            } => lock.thread_timelines.get_mut(thread_root_event_id)?,
+        };
+        let (update_receiver, request_sender) = details.timeline_singleton_endpoints.take()?;
+
+        Some(TimelineEndpoints {
+            _update_sender: details.timeline_update_sender.clone(),
+            update_receiver,
+            request_sender,
+            _successor_room: details.timeline.room().successor_room(),
+        })
     })
 }
 
@@ -272,6 +299,7 @@ pub async fn timeline_subscriber_handler(
     timeline: Arc<Timeline>,
     timeline_update_sender: crossbeam_channel::Sender<TimelineUpdate>,
     mut request_receiver: watch::Receiver<Vec<BackwardsPaginateUntilEventRequest>>,
+    thread_root_event_id: Option<OwnedEventId>,
 ) {
     /// An inner function that searches the given new timeline items for a target event.
     ///
@@ -297,10 +325,10 @@ pub async fn timeline_subscriber_handler(
     }
 
     let room_id = room.room_id().to_owned();
-    debug!("Starting timeline subscriber for room {room_id}...");
+    trace!("Starting timeline subscriber for room {room_id}, thread {thread_root_event_id:?}...");
     let (mut timeline_items, mut subscriber) = timeline.subscribe().await;
-    debug!(
-        "Received initial timeline update of {} items for room {room_id}.",
+    trace!(
+        "Received initial timeline update of {} items for room {room_id}, thread {thread_root_event_id:?}.",
         timeline_items.len()
     );
 
@@ -374,12 +402,23 @@ pub async fn timeline_subscriber_handler(
                             broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         else {
-                            debug!("Target event not in timeline. Starting backwards pagination in room {room_id} to find target event {new_target_event_id} starting from index {starting_index}.");
-
+                            trace!("Target event not in timeline. Starting backwards pagination \
+                                in room {room_id}, thread {thread_root_event_id:?} to find target event \
+                                {new_target_event_id} starting from index {starting_index}.",
+                            );
                             // If we didn't find the target event in the current timeline items,
                             // we need to start loading previous items into the timeline.
-                            submit_async_request(MatrixRequest::PaginateRoomTimeline {
-                                room_id: room_id.clone(),
+                            submit_async_request(MatrixRequest::PaginateTimeline {
+                                timeline_kind: if let Some(thread_root_event_id) = thread_root_event_id.clone() {
+                                    TimelineKind::Thread {
+                                        room_id: room_id.clone(),
+                                        thread_root_event_id,
+                                    }
+                                } else {
+                                    TimelineKind::MainRoom {
+                                        room_id: room_id.clone(),
+                                    }
+                                },
                                 num_events: 50,
                                 direction: PaginationDirection::Backwards,
                             });
@@ -631,4 +670,88 @@ pub async fn update_latest_event(room: &Room) {
         timestamp,
         latest_message_text,
     });
+}
+
+/// Either a main room timeline or a thread-focused timeline.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum TimelineKind {
+    MainRoom {
+        room_id: OwnedRoomId,
+    },
+    Thread {
+        room_id: OwnedRoomId,
+        thread_root_event_id: OwnedEventId,
+    },
+}
+impl TimelineKind {
+    pub fn room_id(&self) -> &OwnedRoomId {
+        match self {
+            TimelineKind::MainRoom { room_id } => room_id,
+            TimelineKind::Thread { room_id, .. } => room_id,
+        }
+    }
+
+    pub fn thread_root_event_id(&self) -> Option<&OwnedEventId> {
+        match self {
+            TimelineKind::MainRoom { .. } => None,
+            TimelineKind::Thread {
+                thread_root_event_id,
+                ..
+            } => Some(thread_root_event_id),
+        }
+    }
+}
+impl std::fmt::Display for TimelineKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimelineKind::MainRoom { room_id } => write!(f, "MainRoom({})", room_id),
+            TimelineKind::Thread {
+                room_id,
+                thread_root_event_id,
+            } => {
+                write!(f, "Thread({}, {})", room_id, thread_root_event_id)
+            }
+        }
+    }
+}
+
+/// The return type for [`take_timeline_endpoints()`].
+///
+/// This primarily contains endpoints for channels of communication
+/// between the timeline UI (`RoomScreen`] and the background worker tasks.
+/// If the relevant room was tombstoned, this also includes info about its successor room.
+pub struct TimelineEndpoints {
+    pub _update_sender: crossbeam_channel::Sender<TimelineUpdate>,
+    pub update_receiver: crossbeam_channel::Receiver<TimelineUpdate>,
+    pub request_sender: TimelineRequestSender,
+    pub _successor_room: Option<SuccessorRoom>,
+}
+
+/// Info about a timeline for a joined room or a thread in a joined room.
+pub(crate) struct PerTimelineDetails {
+    /// A shared reference to a room's main timeline or thread's timeline of events.
+    pub timeline: Arc<Timeline>,
+    /// A clone-able sender for updates to this timeline.
+    pub timeline_update_sender: crossbeam_channel::Sender<TimelineUpdate>,
+    /// A tuple of two separate channel endpoints that can only be taken *once* by the main UI thread.
+    ///
+    /// 1. The single receiver that can receive updates from this timeline.
+    ///    * When a new room is joined (or a thread is opened), an unbounded crossbeam channel will be created
+    ///      and its sender given to a background task (the `timeline_subscriber_handler()`)
+    ///      that enqueues timeline updates as it receives timeline vector diffs from the server.
+    ///    * The UI thread can take ownership of this update receiver in order to receive updates
+    ///      to this room or thread timeline, but only one receiver can exist at a time.
+    /// 2. The sender that can send requests to the background timeline subscriber handler,
+    ///    e.g., to watch for a specific event to be prepended to the timeline (via back pagination).
+    pub timeline_singleton_endpoints: Option<(
+        crossbeam_channel::Receiver<TimelineUpdate>,
+        TimelineRequestSender,
+    )>,
+    /// The async task that listens for updates for this timeline.
+    pub timeline_subscriber_handler_task: JoinHandle<()>,
 }

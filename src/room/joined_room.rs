@@ -1,5 +1,6 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, HashSet},
+    ops::Deref,
     sync::{Arc, Condvar, Mutex},
 };
 
@@ -7,10 +8,11 @@ use crate::{
     events::{
         handlers::get_latest_event_details,
         timeline::{
-            TimelineRequestSender, TimelineUpdate, timeline_subscriber_handler, update_latest_event,
+            PerTimelineDetails, TimelineKind, TimelineUpdate, timeline_subscriber_handler,
+            update_latest_event,
         },
     },
-    init::singletons::{CURRENT_USER_ID, UIUpdateMessage, broadcast_event},
+    init::singletons::{UIUpdateMessage, broadcast_event},
     room::{
         invited_room::{InvitedRoomInfo, InviterInfo},
         rooms_list::{JoinedRoomInfo, RoomsListUpdate, enqueue_rooms_list_update},
@@ -20,44 +22,42 @@ use crate::{
 use matrix_sdk::{
     RoomDisplayName, RoomHero, RoomState,
     event_handler::EventHandlerDropGuard,
-    ruma::{OwnedMxcUri, OwnedRoomId, events::tag::Tags},
+    ruma::{
+        MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId,
+        events::tag::Tags,
+    },
 };
-use matrix_sdk_ui::{RoomListService, Timeline, timeline::RoomExt};
-use tokio::{runtime::Handle, sync::watch, task::JoinHandle};
+use matrix_sdk_ui::{
+    RoomListService, Timeline,
+    timeline::{RoomExt, TimelineFocus},
+};
+use tokio::{runtime::Handle, sync::watch};
 use tracing::{debug, error, info, warn};
 
 /// Backend-specific details about a joined room that our client currently knows about.
 pub struct JoinedRoomDetails {
     #[allow(unused)]
     room_id: OwnedRoomId,
-    /// A reference to this room's timeline of events.
-    pub timeline: Arc<Timeline>,
-    /// An instance of the clone-able sender that can be used to send updates to this room's timeline.
-    pub timeline_update_sender: crossbeam_channel::Sender<TimelineUpdate>,
-    /// A tuple of two separate channel endpoints that can only be taken *once* by the main UI thread.
-    ///
-    /// 1. The single receiver that can receive updates to this room's timeline.
-    ///    * When a new room is joined, an unbounded crossbeam channel will be created
-    ///      and its sender given to a background task (the `timeline_subscriber_handler()`)
-    ///      that enqueues timeline updates as it receives timeline vector diffs from the server.
-    ///    * The UI thread can take ownership of this update receiver in order to receive updates
-    ///      to this room's timeline, but only one receiver can exist at a time.
-    /// 2. The sender that can send requests to the background timeline subscriber handler,
-    ///    e.g., to watch for a specific event to be prepended to the timeline (via back pagination).
-    pub timeline_singleton_endpoints: Option<(
-        crossbeam_channel::Receiver<TimelineUpdate>,
-        TimelineRequestSender,
-    )>,
-    /// The async task that listens for timeline updates for this room and sends them to the UI thread.
-    timeline_subscriber_handler_task: JoinHandle<()>,
+    /// Details about the main timeline for this room.
+    pub(crate) main_timeline: PerTimelineDetails,
+    /// Thread-focused timelines for this room, keyed by thread root event ID.
+    pub(crate) thread_timelines: HashMap<OwnedEventId, PerTimelineDetails>,
+    /// The set of thread timelines currently being created, to avoid duplicate in-flight work.
+    pub(crate) pending_thread_timelines: HashSet<OwnedEventId>,
     /// A drop guard for the event handler that represents a subscription to typing notices for this room.
-    pub typing_notice_subscriber: Option<EventHandlerDropGuard>,
+    pub(crate) typing_notice_subscriber: Option<EventHandlerDropGuard>,
+    /// A drop guard for the event handler that represents a subscription to pinned events for this room.
+    pinned_events_subscriber: Option<EventHandlerDropGuard>,
 }
 impl Drop for JoinedRoomDetails {
     fn drop(&mut self) {
-        debug!("Dropping RoomInfo for room {}", self.room_id);
-        self.timeline_subscriber_handler_task.abort();
+        debug!("Dropping JoinedRoomDetails for room {}", self.room_id);
+        self.main_timeline.timeline_subscriber_handler_task.abort();
+        for thread_timeline in self.thread_timelines.values() {
+            thread_timeline.timeline_subscriber_handler_task.abort();
+        }
         drop(self.typing_notice_subscriber.take());
+        drop(self.pinned_events_subscriber.take());
     }
 }
 
@@ -74,10 +74,12 @@ pub struct RoomListServiceRoomInfo {
     pub room_id: OwnedRoomId,
     state: RoomState,
     is_direct: bool,
+    is_marked_unread: bool,
     is_tombstoned: bool,
     tags: Option<Tags>,
     topic: Option<String>,
     user_power_levels: Option<UserPowerLevels>,
+    latest_event_timestamp: Option<MilliSecondsSinceUnixEpoch>,
     num_unread_messages: u64,
     num_unread_mentions: u64,
     display_name: Option<RoomDisplayName>,
@@ -87,31 +89,44 @@ pub struct RoomListServiceRoomInfo {
 }
 
 impl RoomListServiceRoomInfo {
-    pub(crate) async fn from_room(room: matrix_sdk::Room) -> Self {
+    pub(crate) async fn from_room(
+        room: matrix_sdk::Room,
+        current_user_id: &Option<OwnedUserId>,
+    ) -> Self {
+        // Parallelize fetching of independent room data.
+        let (is_direct, tags, display_name, user_power_levels) =
+            tokio::join!(room.is_direct(), room.tags(), room.display_name(), async {
+                if let Some(user_id) = current_user_id {
+                    UserPowerLevels::from_room(&room, user_id.deref()).await
+                } else {
+                    None
+                }
+            });
+
         Self {
             room_id: room.room_id().to_owned(),
             state: room.state(),
-            is_direct: room.is_direct().await.unwrap_or(false),
+            is_direct: is_direct.unwrap_or(false),
+            is_marked_unread: room.is_marked_unread(),
             is_tombstoned: room.is_tombstoned(),
-            tags: room.tags().await.ok().flatten(),
+            tags: tags.ok().flatten(),
             topic: room.topic(),
-            user_power_levels: if let Some(user_id) = CURRENT_USER_ID.get() {
-                UserPowerLevels::from_room(&room, user_id).await
-            } else {
-                None
-            },
-            // latest_event_timestamp: room.new_latest_event_timestamp(),
+            user_power_levels,
+            latest_event_timestamp: room.latest_event_timestamp(),
             num_unread_messages: room.num_unread_messages(),
             num_unread_mentions: room.num_unread_mentions(),
-            display_name: room.display_name().await.ok(),
+            display_name: display_name.ok(),
             room_avatar: room.avatar_url(),
             heroes: room.heroes(),
             room,
         }
     }
 
-    pub(crate) async fn from_room_ref(room: &matrix_sdk::Room) -> Self {
-        Self::from_room(room.clone()).await
+    pub(crate) async fn from_room_ref(
+        room: &matrix_sdk::Room,
+        current_user_id: &Option<OwnedUserId>,
+    ) -> Self {
+        Self::from_room(room.clone(), current_user_id).await
     }
 }
 
@@ -128,6 +143,7 @@ pub enum UnreadMessageCount {
 pub async fn add_new_room(
     new_room: &RoomListServiceRoomInfo,
     room_list_service: &RoomListService,
+    subscribe: bool,
 ) -> anyhow::Result<()> {
     let direct_user_id_option = if new_room.is_direct && new_room.room.direct_targets_length() == 1
     {
@@ -193,18 +209,24 @@ pub async fn add_new_room(
         RoomState::Joined => {} // Fall through to adding the joined room below.
     }
 
-    // Subscribe to all updates for this room in order to properly receive all of its states,
-    // as well as its latest event (via `Room::new_latest_event_*()` and the `LatestEvents` API).
-    room_list_service
-        .subscribe_to_rooms(&[&new_room.room_id])
-        .await;
+    // If we didn't already subscribe to this room, do so now.
+    // This ensures we will properly receive all of its states and latest event.
+    if subscribe {
+        room_list_service
+            .subscribe_to_rooms(&[&new_room.room_id])
+            .await;
+    }
 
     let timeline = Arc::new(
         new_room
             .room
             .timeline_builder()
+            .with_focus(TimelineFocus::Live {
+                // we show threads as separate timelines in their own RoomScreen
+                hide_threaded_events: true,
+            })
             .track_read_marker_and_receipts(
-                matrix_sdk_ui::timeline::TimelineReadReceiptTracking::MessageLikeEvents,
+                matrix_sdk_ui::timeline::TimelineReadReceiptTracking::AllEvents,
             )
             .build()
             .await
@@ -224,6 +246,7 @@ pub async fn add_new_room(
         timeline.clone(),
         timeline_update_sender.clone(),
         request_receiver,
+        None,
     ));
 
     let latest_event = new_room.room.latest_event().await;
@@ -238,11 +261,16 @@ pub async fn add_new_room(
         new_room.room_id.clone(),
         JoinedRoomDetails {
             room_id: new_room.room_id.clone(),
-            timeline,
-            timeline_singleton_endpoints: Some((timeline_update_receiver, request_sender)),
-            timeline_update_sender,
-            timeline_subscriber_handler_task,
+            main_timeline: PerTimelineDetails {
+                timeline,
+                timeline_singleton_endpoints: Some((timeline_update_receiver, request_sender)),
+                timeline_update_sender,
+                timeline_subscriber_handler_task,
+            },
+            thread_timelines: HashMap::new(),
+            pending_thread_timelines: HashSet::new(),
             typing_notice_subscriber: None,
+            pinned_events_subscriber: None,
         },
     );
     // We need to add the room to the `ALL_JOINED_ROOMS` list before we can
@@ -255,6 +283,7 @@ pub async fn add_new_room(
         topic: new_room.topic.clone(),
         num_unread_messages: new_room.num_unread_messages,
         num_unread_mentions: new_room.num_unread_mentions,
+        is_marked_unread: new_room.is_marked_unread,
         avatar: new_room.room_avatar.clone(),
         room_name: new_room
             .display_name
@@ -315,14 +344,14 @@ pub async fn update_room(
                         "update_room(): adding new Joined room: {:?} ({new_room_id})",
                         new_room.display_name
                     );
-                    return add_new_room(new_room, room_list_service).await;
+                    return add_new_room(new_room, room_list_service, true).await;
                 }
                 RoomState::Invited => {
                     debug!(
                         "update_room(): adding new Invited room: {:?} ({new_room_id})",
                         new_room.display_name
                     );
-                    return add_new_room(new_room, room_list_service).await;
+                    return add_new_room(new_room, room_list_service, true).await;
                 }
                 RoomState::Knocked => {
                     // TODO: handle Knocked rooms (e.g., can you re-knock? or cancel a prior knock?)
@@ -377,13 +406,17 @@ pub async fn update_room(
             // to the latest event in a given room, such as redactions.
             // Thus, we have to re-obtain the latest event on *every* update, regardless of timestamp.
             //
-            // let should_update_latest = match (old_room.latest_event_timestamp, new_room.new_latest_event_timestamp()) {
-            //     (Some(old_ts), Some(new_ts)) if new_ts > old_ts => true,
-            //     (None, Some(_)) => true,
-            //     _ => false,
-            // };
-            // if should_update_latest { ... }
-            update_latest_event(&new_room.room).await;
+            let update_latest = match (
+                old_room.latest_event_timestamp,
+                new_room.room.latest_event_timestamp(),
+            ) {
+                (Some(old_ts), Some(new_ts)) => new_ts >= old_ts,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            if update_latest {
+                update_latest_event(&new_room.room).await;
+            }
 
             if old_room.tags != new_room.tags {
                 debug!(
@@ -396,7 +429,8 @@ pub async fn update_room(
                 });
             }
 
-            if old_room.num_unread_messages != new_room.num_unread_messages
+            if old_room.is_marked_unread != new_room.is_marked_unread
+                || old_room.num_unread_messages != new_room.num_unread_messages
                 || old_room.num_unread_mentions != new_room.num_unread_mentions
             {
                 debug!(
@@ -409,6 +443,7 @@ pub async fn update_room(
                 );
                 enqueue_rooms_list_update(RoomsListUpdate::UpdateNumUnreadMessages {
                     room_id: new_room_id.clone(),
+                    is_marked_unread: new_room.is_marked_unread,
                     unread_messages: UnreadMessageCount::Known(new_room.num_unread_messages),
                     unread_mentions: new_room.num_unread_mentions,
                 });
@@ -430,8 +465,13 @@ pub async fn update_room(
                 if __timeline_update_sender_opt.is_none()
                     && let Some(jrd) = try_get_room_details(room_id)
                 {
-                    __timeline_update_sender_opt =
-                        Some(jrd.lock().unwrap().timeline_update_sender.clone());
+                    __timeline_update_sender_opt = Some(
+                        jrd.lock()
+                            .unwrap()
+                            .main_timeline
+                            .timeline_update_sender
+                            .clone(),
+                    );
                 }
                 __timeline_update_sender_opt.clone()
             };
@@ -484,7 +524,7 @@ pub async fn update_room(
             old_room.room_id, new_room_id,
         );
         remove_room(old_room);
-        add_new_room(new_room, room_list_service).await
+        add_new_room(new_room, room_list_service, true).await
     }
 }
 
@@ -578,4 +618,39 @@ pub fn clear_all_rooms() {
     cvar.notify_all();
 
     // map_guard is dropped here, releasing the BTreeMap lock.
+}
+
+fn with_per_timeline_details<F, R>(kind: &TimelineKind, f: F) -> Option<R>
+where
+    F: FnOnce(&mut PerTimelineDetails) -> R,
+{
+    let lock = crate::room::joined_room::try_get_room_details(kind.room_id())?;
+    let mut room_info = lock.lock().unwrap();
+
+    let details = match kind {
+        TimelineKind::MainRoom { .. } => Some(&mut room_info.main_timeline),
+        TimelineKind::Thread {
+            thread_root_event_id,
+            ..
+        } => room_info.thread_timelines.get_mut(thread_root_event_id),
+    }?;
+
+    Some(f(details))
+}
+
+/// Obtains the lock on `ALL_JOINED_ROOMS` and returns the timeline and timeline update sender for the given timeline kind.
+pub(crate) fn get_timeline_and_sender(
+    kind: &TimelineKind,
+) -> Option<(Arc<Timeline>, crossbeam_channel::Sender<TimelineUpdate>)> {
+    with_per_timeline_details(kind, |details| {
+        (
+            details.timeline.clone(),
+            details.timeline_update_sender.clone(),
+        )
+    })
+}
+
+/// Obtains the lock on `ALL_JOINED_ROOMS` and returns the timeline for the given timeline kind.
+pub(crate) fn get_timeline(kind: &TimelineKind) -> Option<Arc<Timeline>> {
+    with_per_timeline_details(kind, |details| details.timeline.clone())
 }

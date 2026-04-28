@@ -1,6 +1,6 @@
 use std::{
     borrow::{Borrow, BorrowMut},
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 use tracing::{debug, error, info, warn};
@@ -22,6 +22,7 @@ use tokio::{
 };
 
 use crate::{
+    events::timeline::TimelineKind,
     init::singletons::{ALL_ROOMS_LOADED, UIUpdateMessage, broadcast_event},
     models::{
         events::{ToastNotificationRequest, ToastNotificationVariant},
@@ -34,7 +35,7 @@ use crate::{
         notifications::enqueue_toast_notification,
         room_filter::{RoomDisplayFilterBuilder, RoomFilterCriteria, SortFn},
     },
-    stores::room_store::send_room_creation_request_and_await_response,
+    utils::VecDiff,
 };
 
 use super::{room_filter::RoomDisplayFilter, room_screen::RoomScreen};
@@ -65,9 +66,10 @@ pub enum RoomsListUpdate {
         /// The Html-formatted text preview of the latest message.
         latest_message_text: String,
     },
-    /// Update the number of unread messages for the given room.
+    /// Update the number of unread messages and mentions for the given room.
     UpdateNumUnreadMessages {
         room_id: OwnedRoomId,
+        is_marked_unread: bool,
         unread_messages: UnreadMessageCount,
         unread_mentions: u64,
     },
@@ -106,6 +108,14 @@ pub enum RoomsListUpdate {
     Status { status: RoomsCollectionStatus },
     /// Mark the given room as tombstoned.
     TombstonedRoom { room_id: OwnedRoomId },
+    /// Hide the given room from being displayed.
+    ///
+    /// This is useful for temporarily preventing a room from being shown,
+    /// e.g., after a room has been left but before the homeserver has registered
+    /// that we left it and removed it via the RoomListService.
+    HideRoom { room_id: OwnedRoomId },
+    /// Update the ordering of rooms based on the given diff.
+    RoomOrderUpdate(VecDiff<OwnedRoomId>),
     /// Apply a filter to the rooms list
     ApplyFilter { keywords: String },
 }
@@ -134,6 +144,8 @@ pub struct JoinedRoomInfo {
     pub(crate) num_unread_messages: u64,
     /// The number of unread mentions in this room.
     pub(crate) num_unread_mentions: u64,
+    /// Whether the room is manually marked as unread.
+    pub(crate) is_marked_unread: bool,
     /// The canonical alias for this room, if any.
     pub(crate) canonical_alias: Option<OwnedRoomAliasId>,
     /// The alternative aliases for this room, if any.
@@ -203,6 +215,12 @@ pub struct RoomsList {
     /// The set of all joined rooms and their cached preview info.
     all_joined_rooms: HashMap<OwnedRoomId, JoinedRoomInfo>,
 
+    /// The list of all room IDs in display order, matching the order from the room list service.
+    all_known_rooms_order: VecDeque<OwnedRoomId>,
+
+    /// Rooms that are explicitly hidden and should never be shown in the rooms list.
+    hidden_rooms: HashSet<OwnedRoomId>,
+
     /// The currently-active filter function for the list of rooms.
     ///
     /// Note: for performance reasons, this does not get automatically applied
@@ -238,8 +256,8 @@ pub struct RoomsList {
 
     /// The latest status message that should be displayed in the bottom status label.
     status: RoomsCollectionStatus,
-    /// The ID of the currently-selected room.
-    current_active_room: Option<OwnedRoomId>,
+    /// The ID of the currently-selected timeline.
+    current_active_room: Option<TimelineKind>,
     /// The current active room sender to interrupt the task when room is closed.
     /// Backend only
     #[serde(skip)]
@@ -273,6 +291,8 @@ impl RoomsList {
             display_filter: RoomDisplayFilter::default(),
             filter_keywords: "".to_owned(),
             displayed_regular_rooms: Vec::new(),
+            all_known_rooms_order: VecDeque::new(),
+            hidden_rooms: HashSet::new(),
             displayed_direct_rooms: Vec::new(),
             displayed_invited_rooms: Vec::new(),
             status: RoomsCollectionStatus::NotLoaded("Initiating".to_owned()),
@@ -296,6 +316,8 @@ impl RoomsList {
     /// Handle all pending updates to the list of all rooms.
     pub(crate) async fn handle_rooms_list_updates(&mut self) {
         let mut num_updates: usize = 0;
+        let mut needs_sort = false;
+
         while let Some(update) = PENDING_ROOM_UPDATES.pop() {
             num_updates += 1;
 
@@ -326,19 +348,6 @@ impl RoomsList {
                     if let Some(_old_room) = replaced {
                         error!("BUG: Added joined room {room_id} that already existed");
                     } else if should_display {
-                        // Create frontend state store
-                        if let Err(e) =
-                            send_room_creation_request_and_await_response(room_id.as_str()).await
-                        {
-                            enqueue_toast_notification(ToastNotificationRequest::new(
-                                format!(
-                                    "Cannot create frontend store for room {}. Error: {e}",
-                                    room_id.as_str()
-                                ),
-                                None,
-                                ToastNotificationVariant::Error,
-                            ))
-                        }
                         if is_direct {
                             self.displayed_direct_rooms.push(room_id.clone());
                         } else {
@@ -378,15 +387,17 @@ impl RoomsList {
                 }
                 RoomsListUpdate::UpdateNumUnreadMessages {
                     room_id,
+                    is_marked_unread,
                     unread_messages,
                     unread_mentions,
                 } => {
                     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
-                        (room.num_unread_messages, room.num_unread_mentions) = match unread_messages
-                        {
-                            UnreadMessageCount::_Unknown => (0, 0),
-                            UnreadMessageCount::Known(count) => (count, unread_mentions),
+                        room.num_unread_messages = match unread_messages {
+                            UnreadMessageCount::_Unknown => 0,
+                            UnreadMessageCount::Known(count) => count,
                         };
+                        room.num_unread_mentions = unread_mentions;
+                        room.is_marked_unread = is_marked_unread;
                     } else {
                         warn!(
                             "Warning: couldn't find room {} to update unread messages count",
@@ -597,10 +608,90 @@ impl RoomsList {
                         );
                     }
                 }
+                RoomsListUpdate::HideRoom { room_id } => {
+                    self.hidden_rooms.insert(room_id.clone());
+                    // Hiding a regular room is the most common case (e.g., after its successor is joined),
+                    // so we check that list first.
+                    if let Some(i) = self
+                        .displayed_regular_rooms
+                        .iter()
+                        .position(|r| r == &room_id)
+                    {
+                        self.displayed_regular_rooms.remove(i);
+                    } else if let Some(i) = self
+                        .displayed_direct_rooms
+                        .iter()
+                        .position(|r| r == &room_id)
+                    {
+                        self.displayed_direct_rooms.remove(i);
+                    } else if let Some(i) = self
+                        .displayed_invited_rooms
+                        .iter()
+                        .position(|r| r == &room_id)
+                    {
+                        self.displayed_invited_rooms.remove(i);
+                    }
+                }
+                RoomsListUpdate::RoomOrderUpdate(diff) => match diff {
+                    VecDiff::Append { values } => {
+                        self.all_known_rooms_order.extend(values);
+                        needs_sort = true;
+                    }
+                    VecDiff::Clear => {
+                        self.all_known_rooms_order.clear();
+                        needs_sort = true;
+                    }
+                    VecDiff::PushFront { value } => {
+                        self.all_known_rooms_order.push_front(value);
+                        needs_sort = true;
+                    }
+                    VecDiff::PushBack { value } => {
+                        self.all_known_rooms_order.push_back(value);
+                        needs_sort = true;
+                    }
+                    VecDiff::PopFront => {
+                        self.all_known_rooms_order.pop_front();
+                        needs_sort = true;
+                    }
+                    VecDiff::PopBack => {
+                        self.all_known_rooms_order.pop_back();
+                        needs_sort = true;
+                    }
+                    VecDiff::Insert { index, value } => {
+                        if index <= self.all_known_rooms_order.len() {
+                            self.all_known_rooms_order.insert(index, value);
+                            needs_sort = true;
+                        }
+                    }
+                    VecDiff::Set { index, value } => {
+                        if let Some(existing) = self.all_known_rooms_order.get_mut(index)
+                            && *existing != value
+                        {
+                            *existing = value;
+                            needs_sort = true;
+                        }
+                    }
+                    VecDiff::Remove { index } => {
+                        if index < self.all_known_rooms_order.len() {
+                            self.all_known_rooms_order.remove(index);
+                            needs_sort = true;
+                        }
+                    }
+                    VecDiff::Truncate { length } => {
+                        self.all_known_rooms_order.truncate(length);
+                        needs_sort = true;
+                    }
+                },
                 RoomsListUpdate::ApplyFilter { keywords } => {
                     self.filter_keywords = keywords;
                     // The filter will be applied at the end
                 }
+            }
+        }
+        if needs_sort {
+            // Only re-sort if there's no active filter
+            if self.filter_keywords.is_empty() {
+                self.update_displayed_rooms();
             }
         }
         if num_updates > 0 {
@@ -608,22 +699,22 @@ impl RoomsList {
                 "RoomsList: processed {} updates to the list of all rooms",
                 num_updates
             );
-            self.update_displayed_rooms();
             self.update_frontend_state();
         }
     }
 
     pub(crate) fn handle_current_active_room(
         &mut self,
-        updated_current_active_room: OwnedRoomId,
+        updated_current_active_timeline: TimelineKind,
         room_name: String,
     ) -> anyhow::Result<()> {
         // Don't do anything if the room is already active
         if self
             .current_active_room
             .as_ref()
-            .is_some_and(|id| id == &updated_current_active_room)
+            .is_some_and(|id| id == &updated_current_active_timeline)
         {
+            debug!("Ignored room screen change.");
             return Ok(());
         } else if let Some(sender) = self.current_active_room_killer.take() {
             sender
@@ -633,9 +724,9 @@ impl RoomsList {
             debug!("First time setting a room");
         }
 
-        debug!("Current active room: {updated_current_active_room:?}");
+        debug!("Current active room: {updated_current_active_timeline:?}");
 
-        self.current_active_room = Some(updated_current_active_room.clone());
+        self.current_active_room = Some(updated_current_active_timeline.clone());
 
         let mut ui_subscriber = crate::init::singletons::subscribe_to_events()
             .expect("Couldn't get UI subscriber event");
@@ -643,7 +734,8 @@ impl RoomsList {
         self.current_active_room_killer = Some(tx);
         let updaters = self.state_updaters.clone();
         Handle::current().spawn(async move {
-            let mut room_screen = RoomScreen::new(updaters, updated_current_active_room, room_name);
+            let mut room_screen =
+                RoomScreen::new(updaters, Some(updated_current_active_timeline), room_name);
             room_screen.show_timeline();
 
             loop {
