@@ -113,7 +113,7 @@ pub enum RoomsListUpdate {
     /// This is useful for temporarily preventing a room from being shown,
     /// e.g., after a room has been left but before the homeserver has registered
     /// that we left it and removed it via the RoomListService.
-    HideRoom { room_id: OwnedRoomId },
+    _HideRoom { room_id: OwnedRoomId },
     /// Update the ordering of rooms based on the given diff.
     RoomOrderUpdate(VecDiff<OwnedRoomId>),
     /// Apply a filter to the rooms list
@@ -608,7 +608,7 @@ impl RoomsList {
                         );
                     }
                 }
-                RoomsListUpdate::HideRoom { room_id } => {
+                RoomsListUpdate::_HideRoom { room_id } => {
                     self.hidden_rooms.insert(room_id.clone());
                     // Hiding a regular room is the most common case (e.g., after its successor is joined),
                     // so we check that list first.
