@@ -4,6 +4,7 @@ use matrix_sdk::{
     room::{RoomMember, edit::EditedContent},
     ruma::{
         OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
+        api::client::receipt::create_receipt::v3::ReceiptType,
         events::room::message::{RoomMessageEventContent, RoomMessageEventContentWithoutRelation},
         matrix_uri::MatrixId,
     },
@@ -14,7 +15,9 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::{
-    UserProfile, events::timeline::PaginationDirection, init::singletons::REQUEST_SENDER,
+    UserProfile,
+    events::timeline::{PaginationDirection, TimelineKind},
+    init::singletons::REQUEST_SENDER,
     models::profile::ProfileModel,
     room::frontend_events::timeline_item_id::FrontendTimelineEventItemId,
 };
@@ -34,27 +37,32 @@ pub(crate) fn submit_async_request(req: MatrixRequest) {
 /// The set of requests for async work that can be made to the worker thread.
 #[allow(clippy::large_enum_variant)]
 pub enum MatrixRequest {
-    /// Request to paginate the older (or newer) events of a room's timeline.
-    PaginateRoomTimeline {
-        room_id: OwnedRoomId,
+    /// Request to paginate the older (or newer) events of a room or thread timeline.
+    PaginateTimeline {
+        timeline_kind: TimelineKind,
         /// The maximum number of timeline events to fetch in each pagination batch.
         num_events: u16,
         direction: PaginationDirection,
     },
     /// Request to edit the content of an event in the given room's timeline.
     EditMessage {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         timeline_event_item_id: TimelineEventItemId,
         edited_content: EditedContent,
     },
     /// Request to fetch the full details of the given event in the given room's timeline.
     FetchDetailsForEvent {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         event_id: OwnedEventId,
+    },
+    /// Request to create a thread timeline focused on the given thread root event in the given room.
+    CreateThreadTimeline {
+        room_id: OwnedRoomId,
+        thread_root_event_id: OwnedEventId,
     },
     /// Request to fetch profile information for all members of a room.
     /// This can be *very* slow depending on the number of members in the room.
-    SyncRoomMemberList { room_id: OwnedRoomId },
+    SyncRoomMemberList { timeline_kind: TimelineKind },
     /// Request to join the given room.
     JoinRoom { room_id: OwnedRoomId },
     /// Request to leave the given room.
@@ -62,7 +70,7 @@ pub enum MatrixRequest {
     /// Request to get the actual list of members in a room.
     /// This returns the list of members that can be displayed in the UI.
     GetRoomMembers {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         memberships: RoomMemberships,
         /// * If `true` (not recommended), only the local cache will be accessed.
         /// * If `false` (recommended), details will be fetched from the server.
@@ -84,7 +92,7 @@ pub enum MatrixRequest {
         sender: Option<oneshot::Sender<Option<UserProfile>>>,
     },
     /// Request to fetch the number of unread messages in the given room.
-    GetNumberUnreadMessages { room_id: OwnedRoomId },
+    GetNumberUnreadMessages { timeline_kind: TimelineKind },
     /// Request to ignore/block or unignore/unblock a user.
     IgnoreUser {
         /// Whether to ignore (`true`) or unignore (`false`) the user.
@@ -107,12 +115,9 @@ pub enum MatrixRequest {
     },
     /// Request to send a message to the given room.
     SendMessage {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         message: RoomMessageEventContent,
         replied_to_id: Option<OwnedEventId>,
-        /// If set, the timeline used to send this message will be thread-focused
-        /// on the given event id.
-        thread_root_id: Option<OwnedEventId>,
     },
     /// Sends a notice to the given room that the current user is or is not typing.
     ///
@@ -132,31 +137,32 @@ pub enum MatrixRequest {
     ///
     /// This request does not return a response or notify the UI thread.
     SubscribeToOwnUserReadReceiptsChanged {
-        room_id: OwnedRoomId,
-        /// Whether to subscribe or unsubscribe to changes in the read receipts of our own user for this room
+        timeline_kind: TimelineKind,
+        /// Whether to subscribe or unsubscribe.
         subscribe: bool,
     },
     /// Sends a read receipt for the given event in the given room.
     ReadReceipt {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         event_id: OwnedEventId,
+        receipt_type: ReceiptType,
     },
     /// Sends a read receipt in the given room.
-    MarkRoomAsRead { room_id: OwnedRoomId },
+    MarkRoomAsRead { timeline_kind: TimelineKind },
     /// Sends a request to obtain the power levels for this room.
     ///
     /// The response is delivered back to the main UI thread via [`TimelineUpdate::UserPowerLevels`].
-    GetRoomPowerLevels { room_id: OwnedRoomId },
+    GetRoomPowerLevels { timeline_kind: TimelineKind },
     /// Toggles the given reaction to the given event in the given room.
     ToggleReaction {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         timeline_event_id: TimelineEventItemId,
         reaction: String,
     },
     /// Redacts (deletes) the given event in the given room.
     #[doc(alias("delete"))]
     RedactMessage {
-        room_id: OwnedRoomId,
+        timeline_kind: TimelineKind,
         timeline_event_id: TimelineEventItemId,
         reason: Option<String>,
     },
@@ -216,11 +222,11 @@ impl<'de> Deserialize<'de> for MatrixRequest {
 
         // Match on the event type and deserialize the appropriate variant
         match event {
-            "paginateRoomTimeline" => {
-                let data: PaginateRoomTimelinePayload =
+            "paginateTimeline" => {
+                let data: PaginateTimelinePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                Ok(MatrixRequest::PaginateRoomTimeline {
-                    room_id: data.room_id,
+                Ok(MatrixRequest::PaginateTimeline {
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     num_events: data.num_events,
                     direction: data.direction,
                 })
@@ -229,7 +235,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: EditMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::EditMessage {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     // We only use remote event_id for now. Transaction (local) ids could be supported in the future
                     timeline_event_item_id: data.timeline_event_item_id.inner(),
                     // We only allow editing messages for now.
@@ -240,7 +246,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: FetchDetailsForEventPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::FetchDetailsForEvent {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     event_id: data.event_id,
                 })
             }
@@ -288,7 +294,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: GetNumberUnreadMessagesPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::GetNumberUnreadMessages {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                 })
             }
             // "ignoreUser" => {
@@ -309,10 +315,9 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: SendMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::SendMessage {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     message: data.message,
                     replied_to_id: data.reply_to_id,
-                    thread_root_id: data.thread_root_id,
                 })
             }
             "sendTypingNotice" => {
@@ -335,7 +340,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: SubscribeToOwnUserReadReceiptsChangedPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::SubscribeToOwnUserReadReceiptsChanged {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     subscribe: data.subscribe,
                 })
             }
@@ -343,29 +348,30 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: ReadReceiptPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::ReadReceipt {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     event_id: data.event_id,
+                    receipt_type: data.receipt_type,
                 })
             }
             "markRoomAsRead" => {
                 let data: MarkRoomAsRead =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::MarkRoomAsRead {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                 })
             }
             "getRoomPowerLevels" => {
                 let data: GetRoomPowerLevelsPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::GetRoomPowerLevels {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                 })
             }
             "toggleReaction" => {
                 let data: ToggleReactionPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::ToggleReaction {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     timeline_event_id: TimelineEventItemId::EventId(
                         OwnedEventId::try_from(data.timeline_event_id)
                             .expect("Frontend sent incorrect event id"),
@@ -377,7 +383,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: RedactMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::RedactMessage {
-                    room_id: data.room_id,
+                    timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     timeline_event_id: TimelineEventItemId::EventId(data.timeline_event_id),
                     reason: data.reason,
                 })
@@ -428,7 +434,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
             _ => Err(serde::de::Error::unknown_variant(
                 event,
                 &[
-                    "paginateRoomTimeline",
+                    "paginateTimeline",
                     "editMessage",
                     "fetchDetailsForEvent",
                     // "syncRoomMemberList",
@@ -462,8 +468,9 @@ impl<'de> Deserialize<'de> for MatrixRequest {
 // Helper structs for deserializing payloads
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PaginateRoomTimelinePayload {
+struct PaginateTimelinePayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     num_events: u16,
     direction: PaginationDirection,
 }
@@ -472,6 +479,7 @@ struct PaginateRoomTimelinePayload {
 #[serde(rename_all = "camelCase")]
 struct EditMessagePayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     timeline_event_item_id: FrontendTimelineEventItemId,
     edited_content: RoomMessageEventContentWithoutRelation,
 }
@@ -480,6 +488,7 @@ struct EditMessagePayload {
 #[serde(rename_all = "camelCase")]
 struct FetchDetailsForEventPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     event_id: OwnedEventId,
 }
 
@@ -521,6 +530,7 @@ struct GetUserProfilePayload {
 #[serde(rename_all = "camelCase")]
 struct GetNumberUnreadMessagesPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
 }
 
 // #[derive(Deserialize)]
@@ -535,11 +545,9 @@ struct GetNumberUnreadMessagesPayload {
 #[serde(rename_all = "camelCase")]
 struct SendMessagePayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     message: RoomMessageEventContent,
     reply_to_id: Option<OwnedEventId>,
-    /// If set, the timeline used to send this message will be thread-focused
-    /// on the given event id.
-    thread_root_id: Option<OwnedEventId>,
 }
 
 #[derive(Deserialize)]
@@ -560,6 +568,7 @@ struct SubscribeToTypingNoticesPayload {
 #[serde(rename_all = "camelCase")]
 struct SubscribeToOwnUserReadReceiptsChangedPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     subscribe: bool,
 }
 
@@ -567,25 +576,30 @@ struct SubscribeToOwnUserReadReceiptsChangedPayload {
 #[serde(rename_all = "camelCase")]
 struct ReadReceiptPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     event_id: OwnedEventId,
+    receipt_type: ReceiptType,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MarkRoomAsRead {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetRoomPowerLevelsPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ToggleReactionPayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     timeline_event_id: String,
     reaction: String,
 }
@@ -594,6 +608,7 @@ struct ToggleReactionPayload {
 #[serde(rename_all = "camelCase")]
 struct RedactMessagePayload {
     room_id: OwnedRoomId,
+    thread_root_event_id: Option<OwnedEventId>,
     timeline_event_id: OwnedEventId,
     reason: Option<String>,
 }
@@ -634,4 +649,15 @@ struct KickOrBanUserFromRoomPayload {
     user_id: OwnedUserId,
     reason: Option<String>,
     is_ban: bool,
+}
+
+fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
+    if let Some(thread_root_event_id) = root {
+        TimelineKind::Thread {
+            room_id,
+            thread_root_event_id,
+        }
+    } else {
+        TimelineKind::MainRoom { room_id }
+    }
 }

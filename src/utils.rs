@@ -3,9 +3,10 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
-use matrix_sdk::ruma::{OwnedRoomId, RoomId};
+use matrix_sdk::ruma::RoomId;
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
+use crate::events::timeline::TimelineKind;
 use crate::models::async_requests::{MatrixRequest, submit_async_request};
 use crate::models::events::DeviceGuessedType;
 
@@ -16,16 +17,16 @@ use crate::models::events::DeviceGuessedType;
 /// In this case, this will return the event sender's user ID as a string.
 pub fn get_or_fetch_event_sender(
     event_tl_item: &EventTimelineItem,
-    room_id: Option<&OwnedRoomId>,
+    timeline_kind: Option<TimelineKind>,
 ) -> String {
     let sender_username = match event_tl_item.sender_profile() {
         TimelineDetails::Ready(profile) => profile.display_name.as_deref(),
         TimelineDetails::Unavailable => {
-            if let Some(room_id) = room_id
+            if let Some(timeline_kind) = timeline_kind
                 && let Some(event_id) = event_tl_item.event_id()
             {
                 submit_async_request(MatrixRequest::FetchDetailsForEvent {
-                    room_id: room_id.clone(),
+                    timeline_kind,
                     event_id: event_id.to_owned(),
                 });
             }
@@ -220,4 +221,31 @@ pub(crate) fn guess_device_type(display_name: Option<&str>) -> DeviceGuessedType
     } else {
         DeviceGuessedType::Unknown
     }
+}
+
+/// A simplified version of `eyeball_im::VectorDiff` that uses `Vec` instead of `imbl::Vector`.
+///
+/// This is used to communicate room order changes from the room list service to the RoomsList widget.
+#[derive(Debug)]
+pub(crate) enum VecDiff<T> {
+    /// Append the given elements at the end.
+    Append { values: Vec<T> },
+    /// Clear the list.
+    Clear,
+    /// Insert an element at the given index.
+    Insert { index: usize, value: T },
+    /// Set (replace) the element at the given index.
+    Set { index: usize, value: T },
+    /// Remove the element at the given index.
+    Remove { index: usize },
+    /// Push an element at the front.
+    PushFront { value: T },
+    /// Push an element at the back.
+    PushBack { value: T },
+    /// Pop an element from the front.
+    PopFront,
+    /// Pop an element from the back.
+    PopBack,
+    /// Truncate the list to the given length.
+    Truncate { length: usize },
 }

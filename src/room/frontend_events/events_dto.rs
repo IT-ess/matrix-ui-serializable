@@ -1,9 +1,7 @@
 use bitflags::bitflags;
 use std::sync::Arc;
 
-use matrix_sdk::ruma::{
-    OwnedEventId, OwnedRoomId, UInt, event_id, events::room::message::MessageType,
-};
+use matrix_sdk::ruma::{OwnedEventId, UInt, event_id, events::room::message::MessageType};
 use matrix_sdk_ui::timeline::{
     EventTimelineItem, MsgLikeKind, TimelineEventItemId, TimelineItem, TimelineItemContent,
     TimelineItemKind, VirtualTimelineItem,
@@ -11,6 +9,7 @@ use matrix_sdk_ui::timeline::{
 use serde::{Serialize, Serializer};
 
 use crate::{
+    events::timeline::TimelineKind,
     room::frontend_events::{
         msg_like::{FrontendStickerEventContent, SerializableReactions},
         state_event::{
@@ -68,7 +67,7 @@ pub struct FrontendTimelineErrorItem {
 
 pub fn to_frontend_timeline_item(
     item: &Arc<TimelineItem>,
-    room_id: Option<&OwnedRoomId>,
+    timeline_kind: &TimelineKind,
     user_power_levels: &UserPowerLevels,
 ) -> Option<FrontendTimelineItem> {
     let unique_id = item.unique_id().0.clone();
@@ -78,7 +77,10 @@ pub fn to_frontend_timeline_item(
             let is_own = event_tl_item.is_own();
             let is_local = event_tl_item.is_local_echo();
             let timestamp = Some(event_tl_item.timestamp().get());
-            let sender = Some(get_or_fetch_event_sender(event_tl_item, room_id));
+            let sender = Some(get_or_fetch_event_sender(
+                event_tl_item,
+                Some(timeline_kind.clone()),
+            ));
             let sender_id = event_tl_item.sender().to_string();
             let abilities =
                 MessageAbilities::from_user_power_and_event(user_power_levels, event_tl_item);

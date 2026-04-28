@@ -1,10 +1,9 @@
-use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedRoomId};
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId};
 use serde::{Deserialize, Serialize};
 
 // Listen to events
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum ListenEvent {
-    RoomCreated,
     VerificationResult,
     MatrixUpdateCurrentActiveRoom,
     MatrixLogin,
@@ -19,15 +18,9 @@ pub struct MatrixVerificationResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MatrixRoomStoreCreatedRequest {
-    pub id: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MatrixUpdateCurrentActiveRoom {
     pub room_id: OwnedRoomId,
+    pub thread_root_event_id: Option<OwnedEventId>,
     pub room_name: String,
 }
 
@@ -45,7 +38,6 @@ pub struct MatrixLoginPayload {
 
 #[derive(Debug, Clone)]
 pub enum EmitEvent {
-    RoomCreate(MatrixRoomStoreCreateRequest),
     VerificationStart(MatrixVerificationEmojis),
     ToastNotification(ToastNotificationRequest),
     OsNotification(OsNotificationRequest),

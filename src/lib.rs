@@ -15,7 +15,7 @@ use crate::{
         FrontendAuthTypeResponse, check_homeserver_auth_type,
         session::{setup_token_background_save, try_restore_session_to_state},
         singletons::{
-            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, ROOM_CREATED_RECEIVER,
+            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER,
             VERIFICATION_RESPONSE_RECEIVER,
         },
         workers::{async_main_loop, async_worker},
@@ -23,9 +23,8 @@ use crate::{
     models::{
         event_bridge::EventBridge,
         events::{
-            EmitEvent, MatrixLoginPayload, MatrixRoomStoreCreatedRequest,
-            MatrixUpdateCurrentActiveRoom, MatrixVerificationResponse, ToastNotificationRequest,
-            ToastNotificationVariant,
+            EmitEvent, MatrixLoginPayload, MatrixUpdateCurrentActiveRoom,
+            MatrixVerificationResponse, ToastNotificationRequest, ToastNotificationVariant,
         },
         state_updater::StateUpdater,
     },
@@ -70,7 +69,6 @@ impl Serialize for Error {
 /// Required `mpsc:Receiver`s to listen to incoming events
 pub struct EventReceivers {
     // Event based
-    room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
     verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
     room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
     // Command based
@@ -80,14 +78,12 @@ pub struct EventReceivers {
 
 impl EventReceivers {
     pub fn new(
-        room_created_receiver: mpsc::Receiver<MatrixRoomStoreCreatedRequest>,
         verification_response_receiver: mpsc::Receiver<MatrixVerificationResponse>,
         room_update_receiver: mpsc::Receiver<MatrixUpdateCurrentActiveRoom>,
         matrix_login_receiver: mpsc::Receiver<MatrixLoginPayload>,
         oauth_deeplink_receiver: mpsc::Receiver<Url>,
     ) -> Self {
         Self {
-            room_created_receiver,
             verification_response_receiver,
             room_update_receiver,
             matrix_login_receiver,
@@ -148,11 +144,6 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
     let basic_init_handle = Handle::current().spawn(async move {
         // Adapter -> lib events
-        ROOM_CREATED_RECEIVER
-            .set(tokio::sync::Mutex::new(
-                config.event_receivers.room_created_receiver,
-            ))
-            .expect("Couldn't set room created receiver");
 
         VERIFICATION_RESPONSE_RECEIVER
             .set(tokio::sync::Mutex::new(

@@ -17,7 +17,7 @@ pub trait StateUpdater: StateUpdaterFunctions + std::fmt::Debug + Send + Sync {}
 #[async_trait]
 pub trait StateUpdaterFunctions {
     fn update_rooms_list(&self, rooms_list: &RoomsList) -> anyhow::Result<()>;
-    fn update_room(&self, room: &RoomScreen, room_id: &str) -> anyhow::Result<()>;
+    fn update_room(&self, room: &RoomScreen) -> anyhow::Result<()>;
     fn update_sync_service(
         &self,
         sync_service_state: FrontendSyncServiceState,
