@@ -11,6 +11,7 @@ use matrix_sdk::{
             receipt::create_receipt::v3::ReceiptType,
             room::create_room,
         },
+        events::room::message::RoomMessageEventContent,
         matrix_uri::MatrixId,
     },
 };
@@ -746,7 +747,8 @@ pub async fn async_worker(
                     };
                 });
             }
-            MatrixRequest::SendMessage {
+
+            MatrixRequest::SendTextMessage {
                 timeline_kind,
                 message,
                 replied_to_id,
@@ -760,9 +762,13 @@ pub async fn async_worker(
                 // Spawn a new async task that will send the actual message.
                 let _send_message_task = Handle::current().spawn(async move {
                     debug!("Sending message to room {timeline_kind}: {message:?}...");
+                    let message_content = RoomMessageEventContent::text_plain(message);
                     if let Some(replied_event_id) = replied_to_id {
-                        match timeline.send_reply(message.into(), replied_event_id).await {
-                            Ok(_send_handle) => {
+                        match timeline
+                            .send_reply(message_content.into(), replied_event_id)
+                            .await
+                        {
+                            Ok(_) => {
                                 debug!("Sent reply message to room {timeline_kind}.")
                             }
                             Err(_e) => {
@@ -777,7 +783,7 @@ pub async fn async_worker(
                             }
                         }
                     } else {
-                        match timeline.send(message.into()).await {
+                        match timeline.send(message_content.into()).await {
                             Ok(_send_handle) => debug!("Sent message to room {timeline_kind}."),
                             Err(e) => {
                                 warn!("Failed to send message to room {timeline_kind}: {e:?}");

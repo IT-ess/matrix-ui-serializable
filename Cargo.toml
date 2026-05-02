@@ -15,13 +15,13 @@ serde = "1.0"
 serde_json = "1"
 thiserror = "2"
 anyhow = "1.0.102"
-matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "eda8d1df38e656fa2eb68626d3f8d51116cc0f7e", default-features = false, features = [
+matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "4e8ceaac82af169aeae484c8e1db7befd4f8ac97", default-features = false, features = [
     "anyhow",
     "bundled-sqlite",
     "e2e-encryption",
     "automatic-room-key-forwarding",
 ] }
-matrix-sdk-ui = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "eda8d1df38e656fa2eb68626d3f8d51116cc0f7e", default-features = false }
+matrix-sdk-ui = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "4e8ceaac82af169aeae484c8e1db7befd4f8ac97", default-features = false }
 futures = "0.3.31"
 futures-util = "0.3.31"
 tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
@@ -37,4 +37,4 @@ rand = "0.10"
 url = "2.5.7"
 mime = "0.3.17"
 tracing = "0.1.43"
-reqwest = { version = "0.13.2", default-features = false, features = ["default-tls"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["default-tls"] }

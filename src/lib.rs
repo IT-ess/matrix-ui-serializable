@@ -425,6 +425,9 @@ pub use stores::login_store::{FrontendSyncServiceState, FrontendVerificationStat
 pub use user::user_profile::UserProfile;
 // The adapter needs some types in those modules
 pub use matrix_sdk::AuthSession;
+pub use matrix_sdk::attachment::{
+    AttachmentInfo, BaseAudioInfo, BaseFileInfo, BaseImageInfo, BaseVideoInfo, Thumbnail,
+};
 pub use matrix_sdk::encryption::recovery::RecoveryState;
 pub use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
 pub use matrix_sdk::ruma::serde::base64::{Base64, Standard, UrlSafe};

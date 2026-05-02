@@ -3,6 +3,7 @@
 use crate::{
     FrontendVerificationState,
     events::timeline::TimelineKind,
+    get_timeline_kind,
     init::{
         login::build_client,
         singletons::{
@@ -25,6 +26,7 @@ use crate::{
     utils::guess_device_type,
 };
 use anyhow::anyhow;
+use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use mime::Mime;
 use rand::{RngExt, distr::Alphanumeric, rng};
 use std::sync::Arc;
@@ -36,10 +38,12 @@ pub use matrix_sdk::ruma::{
     MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, UInt, UserId,
 };
 use matrix_sdk::{
+    attachment::{AttachmentInfo, Thumbnail},
     encryption::CrossSigningResetAuthType,
     ruma::{
         DeviceId, OwnedMxcUri,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
+        events::room::message::TextMessageEventContent,
     },
 };
 
@@ -325,6 +329,41 @@ pub async fn get_event_from_main_timeline(
         &UserPowerLevels::from(&pl, CURRENT_USER_ID.get().unwrap()),
     )
     .ok_or(anyhow!("This item cannot be mapped to a frontend struct"))?)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn send_media_message(
+    room_id: OwnedRoomId,
+    thread_root: Option<OwnedEventId>,
+    buffer: Vec<u8>,
+    filename: String,
+    mime_type: Mime,
+    caption: Option<String>,
+    in_reply_to: Option<OwnedEventId>,
+    info: AttachmentInfo,
+    thumbnail: Option<Thumbnail>,
+) -> crate::Result<()> {
+    let timeline = get_timeline(&get_timeline_kind(room_id, thread_root))
+        .ok_or(anyhow!("Cannot get timeline"))?;
+
+    let source = AttachmentSource::Data {
+        bytes: buffer,
+        filename,
+    };
+
+    let config = AttachmentConfig {
+        caption: caption.map(TextMessageEventContent::plain),
+        in_reply_to,
+        info: Some(info),
+        thumbnail,
+        ..Default::default()
+    };
+
+    timeline
+        .send_attachment(source, mime_type, config)
+        .await
+        .map_err(anyhow::Error::from)
+        .map_err(Into::into)
 }
 
 pub async fn register_notifications(

@@ -5,8 +5,7 @@ use matrix_sdk::{
     ruma::{
         OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
         api::client::receipt::create_receipt::v3::ReceiptType,
-        events::room::message::{RoomMessageEventContent, RoomMessageEventContentWithoutRelation},
-        matrix_uri::MatrixId,
+        events::room::message::RoomMessageEventContentWithoutRelation, matrix_uri::MatrixId,
     },
 };
 use matrix_sdk_ui::timeline::TimelineEventItemId;
@@ -115,9 +114,9 @@ pub enum MatrixRequest {
         content_sender: oneshot::Sender<Result<Vec<u8>, matrix_sdk::Error>>,
     },
     /// Request to send a message to the given room.
-    SendMessage {
+    SendTextMessage {
         timeline_kind: TimelineKind,
-        message: RoomMessageEventContent,
+        message: String,
         replied_to_id: Option<OwnedEventId>,
     },
     /// Sends a notice to the given room that the current user is or is not typing.
@@ -312,10 +311,10 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::ResolveRoomAlias(alias))
             }
-            "sendMessage" => {
-                let data: SendMessagePayload =
+            "sendTextMessage" => {
+                let data: SendTextMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                Ok(MatrixRequest::SendMessage {
+                Ok(MatrixRequest::SendTextMessage {
                     timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     message: data.message,
                     replied_to_id: data.reply_to_id,
@@ -446,7 +445,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "getNumberUnreadMessages",
                     // "ignoreUser",
                     "resolveRoomAlias",
-                    "sendMessage",
+                    "sendTextMessage",
                     "sendTypingNotice",
                     "subscribeToTypingNotices",
                     "subscribeToOwnUserReadReceiptsChanged",
@@ -544,10 +543,10 @@ struct GetNumberUnreadMessagesPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SendMessagePayload {
+struct SendTextMessagePayload {
     room_id: OwnedRoomId,
     thread_root_event_id: Option<OwnedEventId>,
-    message: RoomMessageEventContent,
+    message: String,
     reply_to_id: Option<OwnedEventId>,
 }
 
@@ -652,7 +651,7 @@ struct KickOrBanUserFromRoomPayload {
     is_ban: bool,
 }
 
-fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
+pub(crate) fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
     if let Some(thread_root_event_id) = root {
         TimelineKind::Thread {
             room_id,
