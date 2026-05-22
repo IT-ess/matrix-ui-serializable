@@ -1008,23 +1008,30 @@ pub async fn async_worker(
                 room_avatar,
                 invited_user_ids,
                 topic,
+                is_private,
             } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _create_room_task = Handle::current().spawn(async move {
                     let mut request = create_room::v3::Request::new();
                     request.is_direct = false;
                     request.name = Some(room_name);
-                    // We only support private rooms for now.
-                    request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Private;
+                    if is_private {
+                        request.visibility =
+                            matrix_sdk::ruma::api::client::room::Visibility::Private;
+                        request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
+                    } else {
+                        request.visibility =
+                            matrix_sdk::ruma::api::client::room::Visibility::Public;
+                        request.preset = Some(create_room::v3::RoomPreset::PublicChat);
+                    }
                     request.invite = invited_user_ids;
-                    request.preset = Some(create_room::v3::RoomPreset::TrustedPrivateChat);
                     request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V12);
                     request.topic = topic;
 
                     match client.create_room(request).await {
                         Ok(room) => {
                             info!("Sucessfully created room");
-                            if let Err(e) = room.enable_encryption().await {
+                            if is_private && let Err(e) = room.enable_encryption().await {
                                 enqueue_toast_notification(ToastNotificationRequest::new(
                                     format!("Failed to enable encryption in Room. Error: {e}"),
                                     None,

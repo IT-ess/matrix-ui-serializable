@@ -186,6 +186,7 @@ pub enum MatrixRequest {
         room_avatar: Option<OwnedMxcUri>,
         invited_user_ids: Vec<OwnedUserId>,
         topic: Option<String>,
+        is_private: bool,
     },
     /// Invite a list of users to a room
     InviteUsersInRoom {
@@ -404,6 +405,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     room_avatar: data.room_avatar,
                     invited_user_ids: data.invited_user_ids,
                     topic: data.topic,
+                    is_private: data.is_private,
                 })
             }
             "createDMRoom" => {
@@ -633,6 +635,7 @@ struct CreateRoomPayload {
     room_avatar: Option<OwnedMxcUri>,
     invited_user_ids: Vec<OwnedUserId>,
     topic: Option<String>,
+    is_private: bool,
 }
 
 #[derive(Deserialize)]
