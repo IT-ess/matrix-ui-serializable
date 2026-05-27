@@ -5,14 +5,13 @@ use futures::{StreamExt, pin_mut};
 use matrix_sdk::{
     Client, RoomMemberships,
     ruma::{
-        RoomOrAliasId,
+        OwnedRoomId,
         api::client::{
             profile::{AvatarUrl, DisplayName},
             receipt::create_receipt::v3::ReceiptType,
             room::create_room,
         },
         events::room::message::RoomMessageEventContent,
-        matrix_uri::MatrixId,
     },
 };
 use matrix_sdk_ui::timeline::{RoomExt, TimelineFocus, TimelineReadReceiptTracking};
@@ -45,7 +44,9 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::{
-        joined_room::{UnreadMessageCount, get_timeline, get_timeline_and_sender},
+        joined_room::{
+            UnreadMessageCount, get_timeline, get_timeline_and_sender, wait_for_room_details,
+        },
         notifications::{enqueue_toast_notification, process_toast_notifications},
         rooms_list::{
             RoomsCollectionStatus, RoomsList, RoomsListUpdate, enqueue_rooms_list_update,
@@ -279,6 +280,33 @@ pub async fn async_worker(
                 });
             }
 
+            MatrixRequest::Knock {
+                room_or_alias_id,
+                reason,
+                server_names,
+            } => {
+                let Some(client) = CLIENT.get() else { continue };
+                let _knock_room_task = Handle::current().spawn(async move {
+                    info!("Sending request to knock on room {room_or_alias_id}...");
+                    match client
+                        .knock(room_or_alias_id.clone(), reason, server_names)
+                        .await
+                    {
+                        Ok(room) => {
+                            let _ = room.display_name().await; // populate this room's display name cache
+                        }
+                        Err(error) => {
+                            error!("Failed to knock room: {error:?}");
+                            enqueue_toast_notification(ToastNotificationRequest::new(
+                                format!("Failed to knock room: {error:?}"),
+                                None,
+                                ToastNotificationVariant::Error,
+                            ));
+                        }
+                    }
+                });
+            }
+
             MatrixRequest::FetchDetailsForEvent {
                 timeline_kind,
                 event_id,
@@ -329,19 +357,61 @@ pub async fn async_worker(
                     broadcast_event(UIUpdateMessage::RefreshUI);
                 });
             }
-            MatrixRequest::JoinRoom { room_id } => {
+            MatrixRequest::JoinRoom {
+                room_or_alias_id,
+                via,
+            } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _join_room_task = Handle::current().spawn(async move {
-                    debug!("Sending request to join room {room_id}...");
-                    if let Some(room) = client.get_room(&room_id) {
-                        match room.join().await {
-                            Ok(()) => {
+                    debug!("Sending request to join room {room_or_alias_id}...");
+                    if let Some(server_names) = via
+                        && room_or_alias_id.is_room_alias_id()
+                    {
+                        // This room is probably a public room that should be joined with an alias and "via" server_names
+                        match client
+                            .join_room_by_id_or_alias(&room_or_alias_id, &server_names)
+                            .await
+                        {
+                            Ok(room) => {
+                                debug!("Successfully joined room {room_or_alias_id}.");
+                                enqueue_toast_notification(ToastNotificationRequest::new(
+                                    format!("Successfully joined room {room_or_alias_id}."),
+                                    None,
+                                    ToastNotificationVariant::Success,
+                                ));
+                                let room_id = room.room_id().to_owned();
+                                // We block this thread until the room is fully available in the rooms list.
+                                wait_for_room_details(&room_id);
+                                let event_bridge =
+                                    get_event_bridge().expect("event bridge should be defined");
+                                event_bridge.emit(EmitEvent::NewlyCreatedRoomId(room_id));
+                            }
+                            Err(e) => {
+                                error!("Error joining new unknown room {room_or_alias_id}: {e:?}");
+                                enqueue_toast_notification(ToastNotificationRequest::new(
+                                    format!(
+                                        "Error joining new unknown room {room_or_alias_id}: {e:?}"
+                                    ),
+                                    None,
+                                    ToastNotificationVariant::Error,
+                                ));
+                            }
+                        }
+                    } else if let Ok(room_id) = OwnedRoomId::try_from(room_or_alias_id) {
+                        // Join directly with a room_id
+                        match client.join_room_by_id(&room_id).await {
+                            Ok(_) => {
                                 debug!("Successfully joined room {room_id}.");
                                 enqueue_toast_notification(ToastNotificationRequest::new(
                                     format!("Successfully joined room {room_id}."),
                                     None,
                                     ToastNotificationVariant::Success,
                                 ));
+                                // We block this thread until the room is fully available in the rooms list.
+                                wait_for_room_details(&room_id);
+                                let event_bridge =
+                                    get_event_bridge().expect("event bridge should be defined");
+                                event_bridge.emit(EmitEvent::NewlyCreatedRoomId(room_id));
                             }
                             Err(e) => {
                                 error!("Error joining room {room_id}: {e:?}");
@@ -352,13 +422,6 @@ pub async fn async_worker(
                                 ));
                             }
                         }
-                    } else {
-                        error!("BUG: client could not get room with ID {room_id}");
-                        enqueue_toast_notification(ToastNotificationRequest::new(
-                            format!("BUG: client could not get room with ID {room_id}"),
-                            None,
-                            ToastNotificationVariant::Error,
-                        ));
                     }
                 });
             }
@@ -932,28 +995,6 @@ pub async fn async_worker(
                                 None,
                                 ToastNotificationVariant::Error,
                             ));
-                        }
-                    }
-                });
-            }
-            MatrixRequest::GetMatrixRoomLinkPillInfo { matrix_id, via } => {
-                let Some(client) = CLIENT.get() else { continue };
-                let _fetch_matrix_link_pill_info_task = Handle::current().spawn(async move {
-                    let room_or_alias_id: Option<&RoomOrAliasId> = match &matrix_id {
-                        MatrixId::Room(room_id) => Some((&**room_id).into()),
-                        MatrixId::RoomAlias(room_alias_id) => Some((&**room_alias_id).into()),
-                        MatrixId::Event(room_or_alias_id, _event_id) => Some(room_or_alias_id),
-                        _ => {
-                            warn!("MatrixLinkRoomPillInfoRequest: Unsupported MatrixId type: {matrix_id:?}");
-                            return;
-                        }
-                    };
-                    if let Some(room_or_alias_id) = room_or_alias_id {
-                        match client.get_room_preview(room_or_alias_id, via).await {
-                            Ok(_preview) => {},
-                            Err(e) => {
-                                error!("Failed to get room link pill info for {room_or_alias_id:?}: {e:?}");
-                            }
                         }
                     }
                 });

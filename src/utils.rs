@@ -1,9 +1,11 @@
+use matrix_sdk::ruma::matrix_uri::MatrixId;
+use matrix_sdk::{IdParseError, OwnedServerName};
 use std::borrow::Cow;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
-use matrix_sdk::ruma::RoomId;
+use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedRoomOrAliasId, RoomId};
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
 use crate::events::timeline::TimelineKind;
@@ -229,4 +231,38 @@ pub(crate) enum VecDiff<T> {
     PopBack,
     /// Truncate the list to the given length.
     Truncate { length: usize },
+}
+
+/// Tries to extract a room address (Alias or ID) from the given text.
+///
+/// This function is quite flexible and will attempt to parse `text` as:
+/// * A Room ID (with a leading `!`).
+/// * A Room Alias (with a leading `#`).
+/// * A `https://matrix.to` URI, which includes either a room alias, or a room ID plus `via` servers.
+/// * A `matrix:` scheme URI, which is similar to above.
+pub(crate) fn parse_address(
+    text: &str,
+) -> Result<(OwnedRoomOrAliasId, Vec<OwnedServerName>), IdParseError> {
+    match OwnedRoomOrAliasId::try_from(text) {
+        Ok(room_or_alias_id) => Ok((room_or_alias_id, Vec::new())),
+        Err(e) => {
+            let uri_result = MatrixToUri::parse(text)
+                .map(|uri| (uri.id().clone(), uri.via().to_owned()))
+                .or_else(|_| {
+                    MatrixUri::parse(text).map(|uri| (uri.id().clone(), uri.via().to_owned()))
+                });
+
+            if let Ok((matrix_id, via)) = uri_result
+                && let Some(room_or_alias_id) = match matrix_id {
+                    MatrixId::Room(room_id) => Some(room_id.into()),
+                    MatrixId::RoomAlias(alias) => Some(alias.into()),
+                    MatrixId::Event(room_or_alias_id, _) => Some(room_or_alias_id),
+                    _ => None,
+                }
+            {
+                return Ok((room_or_alias_id, via));
+            }
+            Err(e)
+        }
+    }
 }

@@ -548,7 +548,7 @@ pub static ALL_JOINED_ROOMS: (Mutex<JoinedRoomsMap>, Condvar) =
 
 /// Wait for joined room details that we know it is going to be initialized.
 /// Do not use this method if you're not sure the room will be init.
-pub fn _wait_for_room_details(room_id: &OwnedRoomId) -> Arc<Mutex<JoinedRoomDetails>> {
+pub fn wait_for_room_details(room_id: &OwnedRoomId) -> Arc<Mutex<JoinedRoomDetails>> {
     let (lock, cvar) = &ALL_JOINED_ROOMS;
 
     let mut map_guard = lock.lock().unwrap();

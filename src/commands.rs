@@ -23,7 +23,7 @@ use crate::{
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
     user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
-    utils::guess_device_type,
+    utils::{guess_device_type, parse_address},
 };
 use anyhow::anyhow;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
@@ -33,17 +33,20 @@ use std::sync::Arc;
 use tracing::info;
 use url::Url;
 
+pub use crate::room::preview::SerializableRoomPreview;
 pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
 pub use matrix_sdk::ruma::{
-    MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, UInt, UserId,
+    MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName,
+    OwnedUserId, UInt, UserId,
 };
 use matrix_sdk::{
     attachment::{AttachmentInfo, Thumbnail},
     encryption::CrossSigningResetAuthType,
+    media::{MediaFormat, MediaRequestParameters},
     ruma::{
         DeviceId, OwnedMxcUri,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
-        events::room::message::TextMessageEventContent,
+        events::room::{MediaSource, message::TextMessageEventContent},
     },
 };
 
@@ -364,6 +367,26 @@ pub async fn send_media_message(
         .await
         .map_err(anyhow::Error::from)
         .map_err(Into::into)
+}
+
+/// Fetches the full preview information for the given non parsed address.
+/// Also fetches that room preview's avatar, if it had an avatar URL.
+pub async fn try_get_room_preview_from_address(
+    text: &str,
+) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
+    let (room, via) = parse_address(text)?;
+    let client = CLIENT.get().ok_or(anyhow!("no client available"))?;
+    let room_preview = client.get_room_preview(&room, via.clone()).await?;
+    // If this room has an avatar URL, fetch it.
+    if let Some(avatar_url) = room_preview.avatar_url.clone() {
+        let media = client.media();
+        let request = MediaRequestParameters {
+            source: MediaSource::Plain(avatar_url),
+            format: MediaFormat::File,
+        };
+        tokio::spawn(async move { media.get_media_content(&request, true).await });
+    };
+    Ok((room_preview.into(), via))
 }
 
 pub async fn register_notifications(
