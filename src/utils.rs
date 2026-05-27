@@ -1,11 +1,12 @@
 use matrix_sdk::ruma::matrix_uri::MatrixId;
 use matrix_sdk::{IdParseError, OwnedServerName};
+use serde::Serialize;
 use std::borrow::Cow;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
-use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedRoomOrAliasId, RoomId};
+use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedRoomOrAliasId, OwnedUserId, RoomId};
 use matrix_sdk_ui::timeline::{EventTimelineItem, TimelineDetails};
 
 use crate::events::timeline::TimelineKind;
@@ -264,5 +265,33 @@ pub(crate) fn parse_address(
             }
             Err(e)
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    content = "payload"
+)]
+pub enum MatrixUriIntent {
+    Room((OwnedRoomOrAliasId, Vec<OwnedServerName>)),
+    User(OwnedUserId),
+}
+
+pub fn get_matrix_uri_intent(text: &str) -> Result<MatrixUriIntent, IdParseError> {
+    let uri = MatrixUri::parse(text)?;
+    match uri.id().clone() {
+        MatrixId::Room(room_id) => Ok(MatrixUriIntent::Room((room_id.into(), uri.via().to_vec()))),
+        MatrixId::RoomAlias(alias) => Ok(MatrixUriIntent::Room((alias.into(), uri.via().to_vec()))),
+        MatrixId::Event(room_or_alias_id, _) => Ok(MatrixUriIntent::Room((
+            room_or_alias_id,
+            uri.via().to_vec(),
+        ))),
+        MatrixId::User(user_id) => Ok(MatrixUriIntent::User(user_id)),
+        _ => Err(IdParseError::InvalidMatrixUri(
+            matrix_sdk::ruma::MatrixUriError::UnknownQueryItem,
+        )),
     }
 }

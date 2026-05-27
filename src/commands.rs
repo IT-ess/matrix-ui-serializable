@@ -23,18 +23,20 @@ use crate::{
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
     user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
-    utils::{guess_device_type, parse_address},
+    utils::{get_matrix_uri_intent, guess_device_type, parse_address},
 };
 use anyhow::anyhow;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use mime::Mime;
 use rand::{RngExt, distr::Alphanumeric, rng};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use url::Url;
 
 pub use crate::room::preview::SerializableRoomPreview;
-pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
+pub use crate::{
+    init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent, utils::MatrixUriIntent,
+};
 pub use matrix_sdk::ruma::{
     MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName,
     OwnedUserId, UInt, UserId,
@@ -387,6 +389,17 @@ pub async fn try_get_room_preview_from_address(
         tokio::spawn(async move { media.get_media_content(&request, true).await });
     };
     Ok((room_preview.into(), via))
+}
+
+/// Handler for the matrix: URIs. It will send a Tauri event to the frontend with the required data.
+pub fn handle_matrix_uri(uri: &Url) {
+    if let Ok(bridge) = get_event_bridge()
+        && let Ok(intent) = get_matrix_uri_intent(uri.as_str())
+    {
+        bridge.emit(EmitEvent::MatrixUriIntent(intent));
+    } else {
+        error!("Cannot translate URI to local intent");
+    }
 }
 
 pub async fn register_notifications(
