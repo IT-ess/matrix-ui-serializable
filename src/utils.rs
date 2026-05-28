@@ -38,25 +38,6 @@ pub fn get_or_fetch_event_sender(
     sender_username.to_owned()
 }
 
-/// Removes leading whitespace and HTML whitespace tags (`<p>` and `<br>`) from the given `text`.
-pub fn trim_start_html_whitespace(mut text: &str) -> &str {
-    let mut prev_text_len = text.len();
-    loop {
-        text = text
-            .trim_start_matches("<p>")
-            .trim_start_matches("<br>")
-            .trim_start_matches("<br/>")
-            .trim_start_matches("<br />")
-            .trim_start();
-
-        if text.len() == prev_text_len {
-            break;
-        }
-        prev_text_len = text.len();
-    }
-    text
-}
-
 /// Looks for bare links in the given `text` and converts them into proper HTML links.
 pub fn linkify(text: &str, is_html: bool) -> Cow<'_, str> {
     use linkify::{LinkFinder, LinkKind};

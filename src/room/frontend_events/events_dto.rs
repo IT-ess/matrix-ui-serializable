@@ -9,7 +9,7 @@ use matrix_sdk_ui::timeline::{
 use serde::{Serialize, Serializer};
 
 use crate::{
-    events::timeline::TimelineKind,
+    events::{format_utils::linkify_text_message, timeline::TimelineKind},
     room::frontend_events::{
         msg_like::{FrontendStickerEventContent, SerializableReactions},
         state_event::{
@@ -124,11 +124,15 @@ fn map_msg_event_content(content: MessageType) -> FrontendMsgLikeKind {
         MessageType::Audio(c) => FrontendMsgLikeKind::Audio(c),
         MessageType::File(c) => FrontendMsgLikeKind::File(c),
         MessageType::Image(c) => FrontendMsgLikeKind::Image(c),
-        MessageType::Text(c) => FrontendMsgLikeKind::Text(c),
+        MessageType::Text(c) => {
+            FrontendMsgLikeKind::Text(linkify_text_message(c.body, c.formatted))
+        }
         MessageType::Video(c) => FrontendMsgLikeKind::Video(c),
         MessageType::Emote(c) => FrontendMsgLikeKind::Emote(c),
         MessageType::Location(c) => FrontendMsgLikeKind::Location(c),
-        MessageType::Notice(c) => FrontendMsgLikeKind::Notice(c),
+        MessageType::Notice(c) => {
+            FrontendMsgLikeKind::Notice(linkify_text_message(c.body, c.formatted))
+        }
         MessageType::ServerNotice(c) => FrontendMsgLikeKind::ServerNotice(c),
         MessageType::VerificationRequest(c) => FrontendMsgLikeKind::VerificationRequest(c),
         _ => FrontendMsgLikeKind::Unknown,

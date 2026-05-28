@@ -14,7 +14,7 @@ use matrix_sdk_ui::timeline::{
     RoomMembershipChange, TimelineItemContent,
 };
 
-use crate::utils::{get_or_fetch_event_sender, trim_start_html_whitespace};
+use crate::{events::format_utils::trim_start_html_whitespace, utils::get_or_fetch_event_sender};
 
 /// What should be displayed before the text preview of an event.
 pub enum BeforeText {

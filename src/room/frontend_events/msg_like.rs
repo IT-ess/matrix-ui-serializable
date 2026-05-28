@@ -6,15 +6,15 @@ use matrix_sdk::ruma::{
     events::{
         room::message::{
             AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent,
-            ImageMessageEventContent, KeyVerificationRequestEventContent,
-            LocationMessageEventContent, NoticeMessageEventContent,
-            ServerNoticeMessageEventContent, TextMessageEventContent, VideoMessageEventContent,
+            FormattedBody, ImageMessageEventContent, KeyVerificationRequestEventContent,
+            LocationMessageEventContent, ServerNoticeMessageEventContent, VideoMessageEventContent,
         },
         sticker::{StickerEventContent, StickerMediaSource},
     },
 };
 use matrix_sdk_ui::timeline::{ReactionInfo, ReactionStatus, ReactionsByKeyBySender};
 use serde::{Serialize, Serializer};
+use url::Url;
 
 use crate::room::frontend_events::thread_summary::FrontendThreadSummary;
 
@@ -42,13 +42,13 @@ pub enum FrontendMsgLikeKind {
     Location(LocationMessageEventContent),
 
     /// A notice message.
-    Notice(NoticeMessageEventContent),
+    Notice(FrontendTextMessage),
 
     /// A server notice message.
     ServerNotice(ServerNoticeMessageEventContent),
 
     /// A text message.
-    Text(TextMessageEventContent),
+    Text(FrontendTextMessage),
 
     /// A video message.
     Video(VideoMessageEventContent),
@@ -226,4 +226,19 @@ impl Serialize for FrontendStickerEventContent {
         state.serialize_field("msgtype", "m.sticker")?;
         state.end()
     }
+}
+
+/// Custom TextMessage struct that adds a Vec of matched URLs
+/// The payload for a text message.
+#[derive(Clone, Debug, Serialize)]
+pub struct FrontendTextMessage {
+    /// The body of the message.
+    pub body: String,
+
+    #[serde(flatten)]
+    /// Formatted form of the message `body`.
+    pub formatted: Option<FormattedBody>,
+
+    /// Custom utility field since we don't support full url_previews right now
+    pub matched_urls: Option<Vec<Url>>,
 }
