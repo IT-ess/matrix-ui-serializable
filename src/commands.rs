@@ -377,7 +377,7 @@ pub async fn try_get_room_preview_from_address(
     text: &str,
 ) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
     let (room, via) = parse_address(text)?;
-    let client = CLIENT.get().ok_or(anyhow!("no client available"))?;
+    let client = CLIENT.wait();
     let room_preview = client.get_room_preview(&room, via.clone()).await?;
     // If this room has an avatar URL, fetch it.
     if let Some(avatar_url) = room_preview.avatar_url.clone() {
