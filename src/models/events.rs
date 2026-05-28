@@ -1,7 +1,7 @@
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId};
 use serde::{Deserialize, Serialize};
 
-use crate::utils::MatrixUriIntent;
+use crate::models::matrix_uri::MatrixUriIntent;
 
 // Listen to events
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]

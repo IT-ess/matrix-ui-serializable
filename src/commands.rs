@@ -14,6 +14,7 @@ use crate::{
     models::{
         async_requests::MatrixRequest,
         events::{EmitEvent, FrontendDevice},
+        matrix_uri::{MatrixUriIntent, get_matrix_uri_intent, parse_address},
         misc::{EditRoomInformationPayload, EditUserInformationPayload},
         state_updater::StateUpdater,
     },
@@ -23,7 +24,7 @@ use crate::{
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
     user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
-    utils::{get_matrix_uri_intent, guess_device_type, parse_address},
+    utils::guess_device_type,
 };
 use anyhow::anyhow;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
@@ -35,7 +36,8 @@ use url::Url;
 
 pub use crate::room::preview::SerializableRoomPreview;
 pub use crate::{
-    init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent, utils::MatrixUriIntent,
+    init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent,
+    models::matrix_uri::MatrixUriPillInfo,
 };
 pub use matrix_sdk::ruma::{
     MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName,
@@ -399,6 +401,20 @@ pub fn handle_matrix_uri(uri: &Url) {
         bridge.emit(EmitEvent::MatrixUriIntent(intent));
     } else {
         error!("Cannot translate URI to local intent");
+    }
+}
+
+pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillInfo> {
+    let intent = get_matrix_uri_intent(uri)?;
+    match intent {
+        MatrixUriIntent::Room((room, via, _)) => {
+            let client = CLIENT.wait();
+            let room_preview = client.get_room_preview(&room, via.clone()).await?;
+            Ok(MatrixUriPillInfo::Room((room_preview.into(), via)))
+        }
+        MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(
+            fetch_user_profile(user_id, None).await?,
+        )),
     }
 }
 
