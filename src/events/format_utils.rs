@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 
 use matrix_sdk::ruma::events::room::message::{FormattedBody, MessageFormat};
+use tracing::warn;
 use url::Url;
 
 use crate::room::frontend_events::msg_like::FrontendTextMessage;
@@ -88,26 +89,92 @@ pub fn linkify_get_urls<'t>(
                 .is_some_and(ends_with_href)
         };
 
-        if is_link_within_href_attr
-            || is_link_within_html_tag(&link)
-            || is_mailto_link_within_href_attr(&link)
-        {
-            linkified_text = format!(
-                "{linkified_text}{}",
-                text.get(last_end_index..link.end()).unwrap_or_default(),
-            );
+        let is_href = is_link_within_href_attr;
+        let is_mailto_href = is_mailto_link_within_href_attr(&link);
+        let is_html_tag = is_link_within_html_tag(&link);
+
+        if is_href || is_mailto_href || is_html_tag {
+            if is_href || is_mailto_href {
+                // Get the text slice from our last position up to the start of the current URL
+                let before_link = text.get(last_end_index..link.start()).unwrap_or_default();
+
+                // Backtrack to find the start of the opening <a> tag container
+                if let Some(a_index) = before_link.rfind("<a").or_else(|| before_link.rfind("<A")) {
+                    let (prefix, tag_body) = before_link.split_at(a_index);
+                    let is_matrix = link_txt.starts_with("matrix:")
+                        || link_txt.starts_with("https://matrix.to");
+
+                    linkified_text.push_str(prefix);
+
+                    if is_matrix {
+                        // Exception rule: inject or append "mx-pill"
+                        if tag_body.contains("class=") {
+                            if let Some(class_idx) = tag_body.find("class=\"") {
+                                let (t_prefix, t_suffix) = tag_body.split_at(class_idx + 7);
+                                linkified_text.push_str(t_prefix);
+                                linkified_text.push_str("mx-pill ");
+                                linkified_text.push_str(t_suffix);
+                            } else if let Some(class_idx) = tag_body.find("class='") {
+                                let (t_prefix, t_suffix) = tag_body.split_at(class_idx + 7);
+                                linkified_text.push_str(t_prefix);
+                                linkified_text.push_str("mx-pill ");
+                                linkified_text.push_str(t_suffix);
+                            } else {
+                                linkified_text.push_str(tag_body);
+                            }
+                        } else {
+                            let (a_lit, rest) = tag_body.split_at(2); // split right after "<a"
+                            linkified_text.push_str(a_lit);
+                            linkified_text.push_str(" class=\"mx-pill\"");
+                            linkified_text.push_str(rest);
+                        }
+                    } else {
+                        // Standard rule: inject target="_blank" and rel attributes safely
+                        let mut injection = String::new();
+                        if !tag_body.contains("target=") {
+                            injection.push_str(" target=\"_blank\"");
+                        }
+                        if !tag_body.contains("rel=") {
+                            injection.push_str(" rel=\"noopener noreferrer\"");
+                        }
+
+                        let (a_lit, rest) = tag_body.split_at(2);
+                        linkified_text.push_str(a_lit);
+                        linkified_text.push_str(&injection);
+                        linkified_text.push_str(rest);
+                    }
+                } else {
+                    linkified_text.push_str(before_link);
+                }
+                // Append the URL itself
+                linkified_text.push_str(text.get(link.start()..link.end()).unwrap_or_default());
+            } else {
+                // `is_html_tag` handles inner tag text (e.g., <a>this text</a>); pass it through unchanged
+                linkified_text.push_str(text.get(last_end_index..link.end()).unwrap_or_default());
+            }
+
             if let Some(links_found) = links_found.as_mut()
                 && let Ok(url) = Url::parse(link_txt)
             {
                 links_found.push(url);
             }
         } else {
+            // Processing bare text links
             match link.kind() {
                 LinkKind::Url => {
+                    let is_matrix = link_txt.starts_with("matrix:")
+                        || link_txt.starts_with("https://matrix.to");
+                    let attrs = if is_matrix {
+                        "class=\"mx-pill\""
+                    } else {
+                        "target=\"_blank\" rel=\"noopener noreferrer\""
+                    };
+
                     linkified_text = format!(
-                        "{linkified_text}{}<a href=\"{}\">{}</a>",
+                        "{linkified_text}{}<a href=\"{}\" {}>{}</a>",
                         escaped(text.get(last_end_index..link.start()).unwrap_or_default()),
                         htmlize::escape_attribute(link_txt),
+                        attrs,
                         htmlize::escape_text(link_txt),
                     );
                     if let Some(links_found) = links_found.as_mut()
@@ -118,13 +185,13 @@ pub fn linkify_get_urls<'t>(
                 }
                 LinkKind::Email => {
                     linkified_text = format!(
-                        "{linkified_text}{}<a href=\"mailto:{}\">{}</a>",
+                        "{linkified_text}{}<a href=\"mailto:{}\" target=\"_blank\" rel=\"noopener noreferrer\">{}</a>",
                         escaped(text.get(last_end_index..link.start()).unwrap_or_default()),
                         htmlize::escape_attribute(link_txt),
                         htmlize::escape_text(link_txt),
                     );
                 }
-                _ => return Cow::Borrowed(text), // unreachable
+                _ => return Cow::Borrowed(text),
             }
         }
         last_end_index = link.end();
