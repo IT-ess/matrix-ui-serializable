@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 
 use matrix_sdk::ruma::events::room::message::{FormattedBody, MessageFormat};
-use tracing::warn;
 use url::Url;
 
 use crate::room::frontend_events::msg_like::FrontendTextMessage;

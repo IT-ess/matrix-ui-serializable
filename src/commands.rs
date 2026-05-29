@@ -1,7 +1,7 @@
 //! All the actions exposed to the frontend that returns a `Result`.
 
 use crate::{
-    FrontendVerificationState,
+    FrontendVerificationState, UserProfile,
     events::timeline::TimelineKind,
     get_timeline_kind,
     init::{
@@ -23,14 +23,14 @@ use crate::{
         joined_room::get_timeline,
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
-    user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
+    user::{user_power_level::UserPowerLevels, user_profile::with_user_profile},
     utils::guess_device_type,
 };
 use anyhow::anyhow;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use mime::Mime;
 use rand::{RngExt, distr::Alphanumeric, rng};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tracing::{error, info};
 use url::Url;
 
@@ -54,7 +54,7 @@ use matrix_sdk::{
     },
 };
 
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, time::sleep};
 
 /// Try to build the client from the url given by the frontend and set its singleton.
 /// Once called, the client is set and the init process can proceed (by calling check_homeserver_auth_type)
@@ -82,16 +82,27 @@ pub fn submit_async_request(request: MatrixRequest) {
     crate::models::async_requests::submit_async_request(request);
 }
 
+/// Polls the UserProfile cache to get a profile or fetch it if needed.
+/// It timeouts after 8 secs.
 pub async fn fetch_user_profile(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,
 ) -> crate::Result<UserProfile> {
-    let (tx, rx) = oneshot::channel();
-    crate::user::user_profile::with_sender(user_id, room_id, true, tx);
-    Ok(rx
-        .await
-        .map_err(anyhow::Error::from)?
-        .ok_or(anyhow!("Update was room only. Cannot get user profile"))?)
+    // Poll the cache every 200ms, up to 40 times (8 seconds timeout)
+    for _ in 0..40 {
+        let user_profile_opt =
+            with_user_profile(user_id.clone(), room_id, true, |profile, _| profile.clone()).await;
+
+        if let Some(user_profile) = user_profile_opt {
+            return Ok(user_profile);
+        }
+
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    Err(crate::Error::Anyhow(anyhow!(
+        "Timed out waiting for user profile to populate"
+    )))
 }
 
 /// Get the list of this user's account registered devices.
@@ -413,7 +424,7 @@ pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillIn
             Ok(MatrixUriPillInfo::Room((room_preview.into(), via)))
         }
         MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(
-            fetch_user_profile(user_id, None).await?,
+            with_user_profile(user_id, None, true, |profile, _| profile.clone()).await,
         )),
     }
 }

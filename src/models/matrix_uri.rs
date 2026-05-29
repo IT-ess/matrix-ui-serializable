@@ -87,5 +87,5 @@ pub fn get_matrix_uri_intent(text: &str) -> Result<MatrixUriIntent, IdParseError
 )]
 pub enum MatrixUriPillInfo {
     Room((SerializableRoomPreview, Vec<OwnedServerName>)),
-    User(UserProfile),
+    User(Option<UserProfile>),
 }

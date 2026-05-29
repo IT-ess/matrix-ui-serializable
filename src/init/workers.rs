@@ -501,7 +501,6 @@ pub async fn async_worker(
                 user_id,
                 room_id,
                 local_only,
-                sender,
             } => {
                 let Some(client) = CLIENT.get() else { continue };
                 let _fetch_task = Handle::current().spawn(async move {
@@ -561,16 +560,15 @@ pub async fn async_worker(
                     }
 
                     if let Some(upd) = update {
-                        if let Some(sender) = sender {
-                         let _ = sender.send(upd.get_user_profile_from_update().cloned());
-                        }
-                        debug!("Successfully completed get user profile request: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
+                        // debug!("Successfully completed get user profile request: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                         enqueue_user_profile_update(upd);
+                        broadcast_event(UIUpdateMessage::RefreshUI);
                     } else {
                         error!("Failed to get user profile: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                     }
                 });
             }
+
             MatrixRequest::GetNumberUnreadMessages { timeline_kind } => {
                 let Some((timeline, sender)) = get_timeline_and_sender(&timeline_kind) else {
                     trace!("Skipping pagination request for unknown {timeline_kind}");
@@ -1214,7 +1212,7 @@ pub async fn ui_worker(
                 let mut lock = rooms_list.lock().await;
                 lock.handle_rooms_list_updates().await;
 
-                process_user_profile_updates(); // Each time the UI is refreshed we check the profiles update queue.
+                process_user_profile_updates().await; // Each time the UI is refreshed we check the profiles update queue.
 
                 let _ = process_toast_notifications().await;
             }

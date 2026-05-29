@@ -14,7 +14,6 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::{
-    UserProfile,
     events::timeline::{PaginationDirection, TimelineKind},
     init::singletons::REQUEST_SENDER,
     models::profile::ProfileModel,
@@ -97,9 +96,6 @@ pub enum MatrixRequest {
         /// * If `true` (not recommended), only the local cache will be accessed.
         /// * If `false` (recommended), details will be fetched from the server.
         local_only: bool,
-        /// matrix-svelte-client: sender used if a command is awaiting for the
-        /// profile. We send it directly through this channel
-        sender: Option<oneshot::Sender<Option<UserProfile>>>,
     },
     /// Request to fetch the number of unread messages in the given room.
     GetNumberUnreadMessages { timeline_kind: TimelineKind },
@@ -301,7 +297,6 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     user_id: data.user_id,
                     room_id: data.room_id,
                     local_only: data.local_only,
-                    sender: None,
                 })
             }
             "getNumberUnreadMessages" => {
