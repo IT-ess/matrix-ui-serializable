@@ -198,7 +198,7 @@ pub fn process_user_profile_updates() {
 
 /// Invokes the given closure with cached user profile info for the given user ID
 /// (optionally in the given room) if it exists in the cache, otherwise does nothing.
-pub async fn with_user_profile<F, R>(
+pub fn with_user_profile<F, R>(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,
     fetch_if_missing: bool,

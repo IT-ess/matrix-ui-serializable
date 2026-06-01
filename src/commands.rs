@@ -91,7 +91,7 @@ pub async fn fetch_user_profile(
     // Poll the cache every 200ms, up to 40 times (8 seconds timeout)
     for _ in 0..40 {
         let user_profile_opt =
-            with_user_profile(user_id.clone(), room_id, true, |profile, _| profile.clone()).await;
+            with_user_profile(user_id.clone(), room_id, true, |profile, _| profile.clone());
 
         if let Some(user_profile) = user_profile_opt {
             return Ok(user_profile);
@@ -429,9 +429,12 @@ pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillIn
             let (room_preview, via) = poll_room_preview(room, via).await?;
             Ok(MatrixUriPillInfo::Room((room_preview, via)))
         }
-        MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(
-            with_user_profile(user_id, None, true, |profile, _| profile.clone()).await,
-        )),
+        MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(with_user_profile(
+            user_id,
+            None,
+            true,
+            |profile, _| profile.clone(),
+        ))),
     }
 }
 
