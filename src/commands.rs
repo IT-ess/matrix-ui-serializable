@@ -40,8 +40,8 @@ pub use crate::{
     models::matrix_uri::MatrixUriPillInfo,
 };
 pub use matrix_sdk::ruma::{
-    MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName,
-    OwnedUserId, UInt, UserId,
+    MatrixToUri, MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId,
+    OwnedServerName, OwnedUserId, UInt, UserId,
 };
 use matrix_sdk::{
     attachment::{AttachmentInfo, Thumbnail},
@@ -427,6 +427,12 @@ pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillIn
             with_user_profile(user_id, None, true, |profile, _| profile.clone()).await,
         )),
     }
+}
+
+pub async fn get_matrix_to_permalink_for_room(room_id: OwnedRoomId) -> anyhow::Result<MatrixToUri> {
+    let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
+    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    room.matrix_to_permalink().await.map_err(Into::into)
 }
 
 pub async fn register_notifications(
