@@ -4,6 +4,7 @@ use anyhow::bail;
 use futures::{StreamExt, pin_mut};
 use matrix_sdk::{
     Client, RoomMemberships,
+    media::{MediaFormat, MediaRequestParameters},
     ruma::{
         OwnedRoomId,
         api::client::{
@@ -11,7 +12,7 @@ use matrix_sdk::{
             receipt::create_receipt::v3::ReceiptType,
             room::create_room,
         },
-        events::room::message::RoomMessageEventContent,
+        events::room::{MediaSource, message::RoomMessageEventContent},
     },
 };
 use matrix_sdk_ui::timeline::{RoomExt, TimelineFocus, TimelineReadReceiptTracking};
@@ -48,6 +49,7 @@ use crate::{
             UnreadMessageCount, get_timeline, get_timeline_and_sender, wait_for_room_details,
         },
         notifications::{enqueue_toast_notification, process_toast_notifications},
+        preview::{RoomPreviewUpdate, enqueue_room_preview_update, process_room_preview_updates},
         rooms_list::{
             RoomsCollectionStatus, RoomsList, RoomsListUpdate, enqueue_rooms_list_update,
         },
@@ -593,6 +595,39 @@ pub async fn async_worker(
                     }
                 });
             }
+
+            MatrixRequest::GetRoomPreview {
+                room_or_alias_id,
+                via,
+            } => {
+                let Some(client) = CLIENT.get() else { continue };
+                let _fetch_task = Handle::current().spawn(async move {
+                    let res = client.get_room_preview(&room_or_alias_id, via).await;
+                    match res {
+                        Ok(fetched) => {
+                            // If this room has an avatar URL, prefetch it.
+                            if let Some(ref avatar_url) = fetched.avatar_url {
+                                let media = client.media();
+                                let request = MediaRequestParameters {
+                                    source: MediaSource::Plain(avatar_url.clone()),
+                                    format: MediaFormat::File,
+                                };
+                                Handle::current().spawn(async move {
+                                    media.get_media_content(&request, true).await
+                                });
+                            }
+                            enqueue_room_preview_update(RoomPreviewUpdate {
+                                room_or_alias_id,
+                                preview: fetched.into(),
+                            })
+                        }
+                        Err(e) => {
+                            error!("Failed to get room preview for {room_or_alias_id:?}: {e:?}")
+                        }
+                    }
+                });
+            }
+
             MatrixRequest::IgnoreUser {
                 ignore,
                 room_member,
@@ -1213,6 +1248,7 @@ pub async fn ui_worker(
                 lock.handle_rooms_list_updates().await;
 
                 process_user_profile_updates().await; // Each time the UI is refreshed we check the profiles update queue.
+                process_room_preview_updates();
 
                 let _ = process_toast_notifications().await;
             }

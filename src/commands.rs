@@ -21,6 +21,7 @@ use crate::{
     room::{
         frontend_events::events_dto::{FrontendTimelineItem, map_event_timeline_item},
         joined_room::get_timeline,
+        preview::{CachedRoomPreview, get_or_fetch_room_preview},
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
     user::{user_power_level::UserPowerLevels, user_profile::with_user_profile},
@@ -46,11 +47,10 @@ pub use matrix_sdk::ruma::{
 use matrix_sdk::{
     attachment::{AttachmentInfo, Thumbnail},
     encryption::CrossSigningResetAuthType,
-    media::{MediaFormat, MediaRequestParameters},
     ruma::{
-        DeviceId, OwnedMxcUri,
+        DeviceId, OwnedMxcUri, OwnedRoomOrAliasId,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
-        events::room::{MediaSource, message::TextMessageEventContent},
+        events::room::message::TextMessageEventContent,
     },
 };
 
@@ -390,18 +390,25 @@ pub async fn try_get_room_preview_from_address(
     text: &str,
 ) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
     let (room, via) = parse_address(text)?;
-    let client = CLIENT.wait();
-    let room_preview = client.get_room_preview(&room, via.clone()).await?;
-    // If this room has an avatar URL, fetch it.
-    if let Some(avatar_url) = room_preview.avatar_url.clone() {
-        let media = client.media();
-        let request = MediaRequestParameters {
-            source: MediaSource::Plain(avatar_url),
-            format: MediaFormat::File,
-        };
-        tokio::spawn(async move { media.get_media_content(&request, true).await });
-    };
-    Ok((room_preview.into(), via))
+    poll_room_preview(room, via).await
+}
+
+async fn poll_room_preview(
+    room: OwnedRoomOrAliasId,
+    via: Vec<OwnedServerName>,
+) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
+    // Poll the cache every 100ms, up to 40 times (4 seconds timeout)
+    for _ in 0..40 {
+        let preview_opt = get_or_fetch_room_preview(&room, &via);
+
+        if let CachedRoomPreview::Loaded { preview } = preview_opt {
+            return Ok((preview, via));
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(anyhow!("Timed out while waiting for room preview"))
 }
 
 /// Handler for the matrix: URIs. It will send a Tauri event to the frontend with the required data.
@@ -419,9 +426,8 @@ pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillIn
     let intent = get_matrix_uri_intent(uri)?;
     match intent {
         MatrixUriIntent::Room((room, via, _)) => {
-            let client = CLIENT.wait();
-            let room_preview = client.get_room_preview(&room, via.clone()).await?;
-            Ok(MatrixUriPillInfo::Room((room_preview.into(), via)))
+            let (room_preview, via) = poll_room_preview(room, via).await?;
+            Ok(MatrixUriPillInfo::Room((room_preview, via)))
         }
         MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(
             with_user_profile(user_id, None, true, |profile, _| profile.clone()).await,

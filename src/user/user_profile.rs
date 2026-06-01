@@ -10,9 +10,8 @@ use matrix_sdk::{
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, btree_map::Entry},
-    sync::LazyLock,
+    sync::{LazyLock, RwLock, RwLockWriteGuard},
 };
-use tokio::sync::{RwLock, RwLockWriteGuard};
 use tracing::warn;
 
 use crate::{MatrixRequest, commands::submit_async_request};
@@ -185,7 +184,7 @@ impl UserProfileUpdate {
 
 /// Processes all pending user profile updates in the queue.
 pub async fn process_user_profile_updates() {
-    let mut cache = USER_PROFILE_CACHE.write().await;
+    let mut cache = USER_PROFILE_CACHE.write().unwrap();
     while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
         // Insert the updated info into the cache
         update.apply_to_cache(&mut cache);
@@ -207,7 +206,7 @@ pub async fn with_user_profile<F, R>(
 where
     F: FnOnce(&UserProfile, &BTreeMap<OwnedRoomId, RoomMember>) -> R,
 {
-    let mut cache = USER_PROFILE_CACHE.write().await;
+    let mut cache = USER_PROFILE_CACHE.write().unwrap();
 
     match cache.entry(user_id) {
         Entry::Occupied(entry) => match entry.get() {

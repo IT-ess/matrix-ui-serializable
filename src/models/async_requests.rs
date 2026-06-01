@@ -85,6 +85,16 @@ pub enum MatrixRequest {
         /// * If `false` (recommended), details will be fetched from the server.
         local_only: bool,
     },
+    /// Request to fetch the preview (basic info) for the given room,
+    /// either one that is joined locally or one that is unknown.
+    ///
+    /// On completion, the result is dispatched according to `response_mode`:
+    /// either as a [`RoomPreviewAction::Fetched`] action, or by enqueueing
+    /// a cache update into the [`crate::room_preview_cache`].
+    GetRoomPreview {
+        room_or_alias_id: OwnedRoomOrAliasId,
+        via: Vec<OwnedServerName>,
+    },
     /// Request to fetch profile information for the given user ID.
     GetUserProfile {
         user_id: OwnedUserId,
