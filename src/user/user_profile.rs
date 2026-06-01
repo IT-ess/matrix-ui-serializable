@@ -14,7 +14,11 @@ use std::{
 };
 use tracing::warn;
 
-use crate::{MatrixRequest, commands::submit_async_request};
+use crate::{
+    MatrixRequest,
+    commands::submit_async_request,
+    init::singletons::{UIUpdateMessage, broadcast_event},
+};
 
 /// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
 static USER_PROFILE_CACHE: LazyLock<RwLock<BTreeMap<OwnedUserId, UserProfileCacheEntry>>> =
@@ -36,6 +40,7 @@ static PENDING_USER_PROFILE_UPDATES: SegQueue<UserProfileUpdate> = SegQueue::new
 /// Enqueues a new user profile update and signals the UI that an update is available.
 pub fn enqueue_user_profile_update(update: UserProfileUpdate) {
     PENDING_USER_PROFILE_UPDATES.push(update);
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 /// A user profile update, which can include changes to a user's full profile
@@ -183,7 +188,7 @@ impl UserProfileUpdate {
 }
 
 /// Processes all pending user profile updates in the queue.
-pub async fn process_user_profile_updates() {
+pub fn process_user_profile_updates() {
     let mut cache = USER_PROFILE_CACHE.write().unwrap();
     while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
         // Insert the updated info into the cache
@@ -193,10 +198,6 @@ pub async fn process_user_profile_updates() {
 
 /// Invokes the given closure with cached user profile info for the given user ID
 /// (optionally in the given room) if it exists in the cache, otherwise does nothing.
-///
-/// This function requires passing in a reference to `Cx`,
-/// which isn't used, but acts as a guarantee that this function
-/// must only be called by the main UI thread.
 pub async fn with_user_profile<F, R>(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,

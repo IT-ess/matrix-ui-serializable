@@ -366,9 +366,7 @@ pub async fn async_worker(
                 let Some(client) = CLIENT.get() else { continue };
                 let _join_room_task = Handle::current().spawn(async move {
                     debug!("Sending request to join room {room_or_alias_id}...");
-                    if let Some(server_names) = via
-                        && room_or_alias_id.is_room_alias_id()
-                    {
+                    if let Some(server_names) = via {
                         // This room is probably a public room that should be joined with an alias and "via" server_names
                         match client
                             .join_room_by_id_or_alias(&room_or_alias_id, &server_names)
@@ -564,7 +562,6 @@ pub async fn async_worker(
                     if let Some(upd) = update {
                         // debug!("Successfully completed get user profile request: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                         enqueue_user_profile_update(upd);
-                        broadcast_event(UIUpdateMessage::RefreshUI);
                     } else {
                         error!("Failed to get user profile: user: {user_id}, room: {room_id:?}, local_only: {local_only}.");
                     }
@@ -1247,10 +1244,9 @@ pub async fn ui_worker(
                 let mut lock = rooms_list.lock().await;
                 lock.handle_rooms_list_updates().await;
 
-                process_user_profile_updates().await; // Each time the UI is refreshed we check the profiles update queue.
+                process_user_profile_updates();
                 process_room_preview_updates();
-
-                let _ = process_toast_notifications().await;
+                process_toast_notifications();
             }
         }
     }

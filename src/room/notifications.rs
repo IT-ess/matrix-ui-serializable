@@ -19,6 +19,7 @@ use matrix_sdk::{
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use serde_json::{Map, json};
+use tracing::error;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use url::Url;
 
@@ -36,15 +37,17 @@ pub fn enqueue_toast_notification(notification: ToastNotificationRequest) {
     broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
-pub async fn process_toast_notifications() -> anyhow::Result<()> {
+pub fn process_toast_notifications() {
     if TOAST_NOTIFICATION.is_empty() {
-        return Ok(());
+        return;
     }
-    let event_bridge = get_event_bridge()?;
+    let Ok(event_bridge) = get_event_bridge() else {
+        error!("Cannot get event bridge to process toasts !");
+        return;
+    };
     while let Some(notif) = TOAST_NOTIFICATION.pop() {
         event_bridge.emit(EmitEvent::ToastNotification(notif));
     }
-    Ok(())
 }
 
 //
