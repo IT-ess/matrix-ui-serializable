@@ -86,7 +86,7 @@ pub async fn register_mobile_push_notifications(
 
     let pusher: Pusher = pusher.into();
 
-    client.pusher().set(pusher).await?;
+    client.pusher().set(pusher, false).await?;
     Ok(())
 }
 
