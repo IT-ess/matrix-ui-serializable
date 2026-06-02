@@ -3,9 +3,9 @@ use matrix_sdk::{
     media::MediaRequestParameters,
     room::{RoomMember, edit::EditedContent},
     ruma::{
-        OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId,
+        OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId,
         api::client::receipt::create_receipt::v3::ReceiptType,
-        events::room::message::RoomMessageEventContentWithoutRelation, matrix_uri::MatrixId,
+        events::room::message::RoomMessageEventContentWithoutRelation,
     },
 };
 use matrix_sdk_ui::timeline::TimelineEventItemId;
@@ -14,7 +14,6 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::{
-    UserProfile,
     events::timeline::{PaginationDirection, TimelineKind},
     init::singletons::REQUEST_SENDER,
     models::profile::ProfileModel,
@@ -60,11 +59,21 @@ pub enum MatrixRequest {
         thread_root_event_id: OwnedEventId,
         sender: oneshot::Sender<()>,
     },
+    /// Request to knock on (request an invite to) the given room.
+    Knock {
+        room_or_alias_id: OwnedRoomOrAliasId,
+        reason: Option<String>,
+        #[doc(alias("via"))]
+        server_names: Vec<OwnedServerName>,
+    },
     /// Request to fetch profile information for all members of a room.
     /// This can be *very* slow depending on the number of members in the room.
     SyncRoomMemberList { timeline_kind: TimelineKind },
     /// Request to join the given room.
-    JoinRoom { room_id: OwnedRoomId },
+    JoinRoom {
+        room_or_alias_id: OwnedRoomOrAliasId,
+        via: Option<Vec<OwnedServerName>>,
+    },
     /// Request to leave the given room.
     LeaveRoom { room_id: OwnedRoomId },
     /// Request to get the actual list of members in a room.
@@ -75,6 +84,16 @@ pub enum MatrixRequest {
         /// * If `true` (not recommended), only the local cache will be accessed.
         /// * If `false` (recommended), details will be fetched from the server.
         local_only: bool,
+    },
+    /// Request to fetch the preview (basic info) for the given room,
+    /// either one that is joined locally or one that is unknown.
+    ///
+    /// On completion, the result is dispatched according to `response_mode`:
+    /// either as a [`RoomPreviewAction::Fetched`] action, or by enqueueing
+    /// a cache update into the [`crate::room_preview_cache`].
+    GetRoomPreview {
+        room_or_alias_id: OwnedRoomOrAliasId,
+        via: Vec<OwnedServerName>,
     },
     /// Request to fetch profile information for the given user ID.
     GetUserProfile {
@@ -87,9 +106,6 @@ pub enum MatrixRequest {
         /// * If `true` (not recommended), only the local cache will be accessed.
         /// * If `false` (recommended), details will be fetched from the server.
         local_only: bool,
-        /// matrix-svelte-client: sender used if a command is awaiting for the
-        /// profile. We send it directly through this channel
-        sender: Option<oneshot::Sender<Option<UserProfile>>>,
     },
     /// Request to fetch the number of unread messages in the given room.
     GetNumberUnreadMessages { timeline_kind: TimelineKind },
@@ -165,13 +181,6 @@ pub enum MatrixRequest {
         timeline_kind: TimelineKind,
         timeline_event_id: TimelineEventItemId,
         reason: Option<String>,
-    },
-    /// Sends a request to obtain the room's pill link info for the given Matrix ID.
-    ///
-    /// The MatrixLinkPillInfo::Loaded variant is sent back to the main UI thread via.
-    GetMatrixRoomLinkPillInfo {
-        matrix_id: MatrixId,
-        via: Vec<OwnedServerName>,
     },
     SearchUsers {
         search_term: String,
@@ -262,7 +271,8 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                 let data: JoinRoomPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::JoinRoom {
-                    room_id: data.room_id,
+                    room_or_alias_id: data.room_or_alias_id,
+                    via: data.via,
                 })
             }
             "leaveRoom" => {
@@ -270,6 +280,15 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::LeaveRoom {
                     room_id: data.room_id,
+                })
+            }
+            "knock" => {
+                let data: KnockPayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::Knock {
+                    room_or_alias_id: data.room_or_alias_id,
+                    reason: data.reason,
+                    server_names: data.server_names,
                 })
             }
             // "getRoomMembers" => {
@@ -288,7 +307,6 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     user_id: data.user_id,
                     room_id: data.room_id,
                     local_only: data.local_only,
-                    sender: None,
                 })
             }
             "getNumberUnreadMessages" => {
@@ -389,14 +407,6 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     reason: data.reason,
                 })
             }
-            // "getMatrixRoomLinkPillInfo" => {
-            //     let data: GetMatrixRoomLinkPillInfoPayload =
-            //         serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-            //     Ok(MatrixRequest::GetMatrixRoomLinkPillInfo {
-            //         matrix_id: data.matrix_id,
-            //         via: data.via,
-            //     })
-            // }
             "createRoom" => {
                 let data: CreateRoomPayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
@@ -503,13 +513,23 @@ struct FetchDetailsForEventPayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JoinRoomPayload {
-    room_id: OwnedRoomId,
+    room_or_alias_id: OwnedRoomOrAliasId,
+    via: Option<Vec<OwnedServerName>>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LeaveRoomPayload {
     room_id: OwnedRoomId,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KnockPayload {
+    room_or_alias_id: OwnedRoomOrAliasId,
+    reason: Option<String>,
+    #[doc(alias("via"))]
+    server_names: Vec<OwnedServerName>,
 }
 
 // #[derive(Deserialize)]
@@ -614,13 +634,6 @@ struct RedactMessagePayload {
     timeline_event_id: OwnedEventId,
     reason: Option<String>,
 }
-
-// #[derive(Deserialize)]
-// #[serde(rename_all = "camelCase")]
-// struct GetMatrixRoomLinkPillInfoPayload {
-//     matrix_id: MatrixId,
-//     via: Vec<OwnedServerName>,
-// }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

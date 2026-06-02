@@ -1,7 +1,7 @@
 //! All the actions exposed to the frontend that returns a `Result`.
 
 use crate::{
-    FrontendVerificationState,
+    FrontendVerificationState, UserProfile,
     events::timeline::TimelineKind,
     get_timeline_kind,
     init::{
@@ -14,40 +14,47 @@ use crate::{
     models::{
         async_requests::MatrixRequest,
         events::{EmitEvent, FrontendDevice},
+        matrix_uri::{MatrixUriIntent, get_matrix_uri_intent, parse_address},
         misc::{EditRoomInformationPayload, EditUserInformationPayload},
         state_updater::StateUpdater,
     },
     room::{
         frontend_events::events_dto::{FrontendTimelineItem, map_event_timeline_item},
         joined_room::get_timeline,
+        preview::{CachedRoomPreview, get_or_fetch_room_preview},
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
     },
-    user::{user_power_level::UserPowerLevels, user_profile::UserProfile},
+    user::{user_power_level::UserPowerLevels, user_profile::with_user_profile},
     utils::guess_device_type,
 };
 use anyhow::anyhow;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use mime::Mime;
 use rand::{RngExt, distr::Alphanumeric, rng};
-use std::sync::Arc;
-use tracing::info;
+use std::{sync::Arc, time::Duration};
+use tracing::{error, info};
 use url::Url;
 
-pub use crate::{init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent};
+pub use crate::room::preview::SerializableRoomPreview;
+pub use crate::{
+    init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent,
+    models::matrix_uri::MatrixUriPillInfo,
+};
 pub use matrix_sdk::ruma::{
-    MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, UInt, UserId,
+    MatrixToUri, MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId,
+    OwnedServerName, OwnedUserId, UInt, UserId,
 };
 use matrix_sdk::{
     attachment::{AttachmentInfo, Thumbnail},
     encryption::CrossSigningResetAuthType,
     ruma::{
-        DeviceId, OwnedMxcUri,
+        DeviceId, OwnedMxcUri, OwnedRoomOrAliasId,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
         events::room::message::TextMessageEventContent,
     },
 };
 
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, time::sleep};
 
 /// Try to build the client from the url given by the frontend and set its singleton.
 /// Once called, the client is set and the init process can proceed (by calling check_homeserver_auth_type)
@@ -75,16 +82,27 @@ pub fn submit_async_request(request: MatrixRequest) {
     crate::models::async_requests::submit_async_request(request);
 }
 
+/// Polls the UserProfile cache to get a profile or fetch it if needed.
+/// It timeouts after 8 secs.
 pub async fn fetch_user_profile(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,
 ) -> crate::Result<UserProfile> {
-    let (tx, rx) = oneshot::channel();
-    crate::user::user_profile::with_sender(user_id, room_id, true, tx);
-    Ok(rx
-        .await
-        .map_err(anyhow::Error::from)?
-        .ok_or(anyhow!("Update was room only. Cannot get user profile"))?)
+    // Poll the cache every 200ms, up to 40 times (8 seconds timeout)
+    for _ in 0..40 {
+        let user_profile_opt =
+            with_user_profile(user_id.clone(), room_id, true, |profile, _| profile.clone());
+
+        if let Some(user_profile) = user_profile_opt {
+            return Ok(user_profile);
+        }
+
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    Err(crate::Error::Anyhow(anyhow!(
+        "Timed out waiting for user profile to populate"
+    )))
 }
 
 /// Get the list of this user's account registered devices.
@@ -364,6 +382,66 @@ pub async fn send_media_message(
         .await
         .map_err(anyhow::Error::from)
         .map_err(Into::into)
+}
+
+/// Fetches the full preview information for the given non parsed address.
+/// Also fetches that room preview's avatar, if it had an avatar URL.
+pub async fn try_get_room_preview_from_address(
+    text: &str,
+) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
+    let (room, via) = parse_address(text)?;
+    poll_room_preview(room, via).await
+}
+
+async fn poll_room_preview(
+    room: OwnedRoomOrAliasId,
+    via: Vec<OwnedServerName>,
+) -> anyhow::Result<(SerializableRoomPreview, Vec<OwnedServerName>)> {
+    // Poll the cache every 100ms, up to 40 times (4 seconds timeout)
+    for _ in 0..40 {
+        let preview_opt = get_or_fetch_room_preview(&room, &via);
+
+        if let CachedRoomPreview::Loaded { preview } = preview_opt {
+            return Ok((preview, via));
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(anyhow!("Timed out while waiting for room preview"))
+}
+
+/// Handler for the matrix: URIs. It will send a Tauri event to the frontend with the required data.
+pub fn handle_matrix_uri(uri: &Url) {
+    if let Ok(bridge) = get_event_bridge()
+        && let Ok(intent) = get_matrix_uri_intent(uri.as_str())
+    {
+        bridge.emit(EmitEvent::MatrixUriIntent(intent));
+    } else {
+        error!("Cannot translate URI to local intent");
+    }
+}
+
+pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillInfo> {
+    let intent = get_matrix_uri_intent(uri)?;
+    match intent {
+        MatrixUriIntent::Room((room, via, _)) => {
+            let (room_preview, via) = poll_room_preview(room, via).await?;
+            Ok(MatrixUriPillInfo::Room((room_preview, via)))
+        }
+        MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(with_user_profile(
+            user_id,
+            None,
+            true,
+            |profile, _| profile.clone(),
+        ))),
+    }
+}
+
+pub async fn get_matrix_to_permalink_for_room(room_id: OwnedRoomId) -> anyhow::Result<MatrixToUri> {
+    let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
+    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    room.matrix_to_permalink().await.map_err(Into::into)
 }
 
 pub async fn register_notifications(

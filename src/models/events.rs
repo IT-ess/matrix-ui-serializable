@@ -1,6 +1,8 @@
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId};
 use serde::{Deserialize, Serialize};
 
+use crate::models::matrix_uri::MatrixUriIntent;
+
 // Listen to events
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum ListenEvent {
@@ -44,6 +46,7 @@ pub enum EmitEvent {
     OAuthUrl(String),
     ResetCrossSigngingUrl(String),
     NewlyCreatedRoomId(OwnedRoomId),
+    MatrixUriIntent(MatrixUriIntent),
 }
 
 #[derive(Debug, Clone, Serialize)]

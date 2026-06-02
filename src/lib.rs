@@ -440,3 +440,4 @@ pub use matrix_sdk::ruma::{
 };
 pub use tokio::sync::mpsc;
 pub use tokio::sync::oneshot;
+pub use tokio::time::sleep;

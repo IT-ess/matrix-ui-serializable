@@ -9,22 +9,22 @@ use matrix_sdk::{
 };
 use serde::Serialize;
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, btree_map::Entry},
+    sync::{LazyLock, RwLock, RwLockWriteGuard},
 };
-use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::{MatrixRequest, commands::submit_async_request};
+use crate::{
+    MatrixRequest,
+    commands::submit_async_request,
+    init::singletons::{UIUpdateMessage, broadcast_event},
+};
 
-thread_local! {
-    /// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
-    ///
-    /// To be of any use, this cache must only be accessed by the main UI thread.
-    static USER_PROFILE_CACHE: RefCell<BTreeMap<OwnedUserId, UserProfileCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
-}
-#[derive(Debug, Clone)]
-pub(crate) enum UserProfileCacheEntry {
+/// A cache of each user's profile and the rooms they are a member of, indexed by user ID.
+static USER_PROFILE_CACHE: LazyLock<RwLock<BTreeMap<OwnedUserId, UserProfileCacheEntry>>> =
+    LazyLock::new(|| RwLock::new(BTreeMap::new()));
+
+enum UserProfileCacheEntry {
     /// A request has been issued and we're waiting for it to complete.
     Requested,
     /// The profile has been successfully loaded from the server.
@@ -40,6 +40,7 @@ static PENDING_USER_PROFILE_UPDATES: SegQueue<UserProfileUpdate> = SegQueue::new
 /// Enqueues a new user profile update and signals the UI that an update is available.
 pub fn enqueue_user_profile_update(update: UserProfileUpdate) {
     PENDING_USER_PROFILE_UPDATES.push(update);
+    broadcast_event(UIUpdateMessage::RefreshUI);
 }
 
 /// A user profile update, which can include changes to a user's full profile
@@ -70,16 +71,11 @@ impl UserProfileUpdate {
         }
     }
 
-    pub fn get_user_profile_from_update(&self) -> Option<&UserProfile> {
-        match self {
-            UserProfileUpdate::Full { new_profile, .. } => Some(new_profile),
-            UserProfileUpdate::RoomMemberOnly { .. } => None,
-            UserProfileUpdate::UserProfileOnly(profile) => Some(profile),
-        }
-    }
-
     /// Applies this update to the given user profile info cache.
-    fn apply_to_cache(self, cache: &mut BTreeMap<OwnedUserId, UserProfileCacheEntry>) {
+    fn apply_to_cache(
+        self,
+        cache: &mut RwLockWriteGuard<'_, BTreeMap<OwnedUserId, UserProfileCacheEntry>>,
+    ) {
         match self {
             UserProfileUpdate::Full {
                 new_profile,
@@ -193,23 +189,27 @@ impl UserProfileUpdate {
 
 /// Processes all pending user profile updates in the queue.
 pub fn process_user_profile_updates() {
-    USER_PROFILE_CACHE.with_borrow_mut(|cache| {
-        while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
-            // Insert the updated info into the cache
-            update.apply_to_cache(cache);
-        }
-    });
+    let mut cache = USER_PROFILE_CACHE.write().unwrap();
+    while let Some(update) = PENDING_USER_PROFILE_UPDATES.pop() {
+        // Insert the updated info into the cache
+        update.apply_to_cache(&mut cache);
+    }
 }
 
 /// Invokes the given closure with cached user profile info for the given user ID
 /// (optionally in the given room) if it exists in the cache, otherwise does nothing.
-pub fn with_sender(
+pub fn with_user_profile<F, R>(
     user_id: OwnedUserId,
     room_id: Option<&OwnedRoomId>,
     fetch_if_missing: bool,
-    sender: oneshot::Sender<Option<UserProfile>>,
-) {
-    USER_PROFILE_CACHE.with_borrow_mut(|cache| match cache.entry(user_id) {
+    f: F,
+) -> Option<R>
+where
+    F: FnOnce(&UserProfile, &BTreeMap<OwnedRoomId, RoomMember>) -> R,
+{
+    let mut cache = USER_PROFILE_CACHE.write().unwrap();
+
+    match cache.entry(user_id) {
         Entry::Occupied(entry) => match entry.get() {
             UserProfileCacheEntry::Loaded {
                 user_profile,
@@ -220,13 +220,13 @@ pub fn with_sender(
                         user_id: entry.key().clone(),
                         room_id: room_id.cloned(),
                         local_only: false,
-                        sender: None,
                     });
                 }
-                let _ = sender.send(Some(user_profile.to_owned()));
+                Some(f(user_profile, rooms))
             }
             UserProfileCacheEntry::Requested => {
                 // log!("User {} profile request is already in flight....", entry.key());
+                None
             }
         },
         Entry::Vacant(entry) => {
@@ -237,12 +237,12 @@ pub fn with_sender(
                     user_id: entry.key().clone(),
                     room_id: room_id.cloned(),
                     local_only: false,
-                    sender: Some(sender),
                 });
                 entry.insert(UserProfileCacheEntry::Requested);
             }
+            None
         }
-    })
+    }
 }
 
 /// A user's display name in our cache.
@@ -280,14 +280,6 @@ impl From<CachedName> for Option<String> {
             CachedName::NotFound => None,
         }
     }
-}
-
-/// Clears cached user profile.
-pub fn _clear_user_profile_cache() {
-    // Clear user profile cache
-    USER_PROFILE_CACHE.with_borrow_mut(|cache| {
-        cache.clear();
-    });
 }
 
 /// Information retrieved about a user: their displayable name, ID, and known avatar state.
