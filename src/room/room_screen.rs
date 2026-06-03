@@ -6,7 +6,7 @@ use matrix_sdk::{
         OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId, events::room::member::MembershipState,
     },
 };
-use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
+use matrix_sdk_ui::eyeball_im::Vector;
 use serde::Serialize;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
@@ -93,7 +93,6 @@ impl RoomScreen {
 
     /// Processes all pending background updates to the currently-shown timeline.
     pub fn process_timeline_updates(&mut self) {
-        let curr_first_id: usize = 0; // TODO: replace this dummy value
         let mut _typing_users = None;
 
         let Some(tl) = self.tl_state.as_mut() else {
@@ -126,40 +125,6 @@ impl RoomScreen {
                         // and then either focus on them (if we're not close to the end of the timeline)
                         // or paginate backwards until we find them (only if we are close the end of the timeline).
                         should_continue_backwards_pagination = true;
-                    }
-                    if new_items.len() == tl.items.len() {
-                        trace!(
-                            "Timeline::handle_event(): no jump necessary for updated timeline of same length: {}",
-                            tl.items.len()
-                        );
-                    } else if curr_first_id > new_items.len() {
-                        trace!(
-                            "Timeline::handle_event(): jumping to bottom: curr_first_id {} is out of bounds for {} new items",
-                            curr_first_id,
-                            new_items.len()
-                        );
-                    } else if let Some((curr_item_idx, new_item_idx, new_item_scroll, _event_id)) =
-                        find_new_item_matching_current_item(
-                            0,
-                            Some(0.0), // TODO replace
-                            curr_first_id,
-                            &tl.items,
-                            &new_items,
-                        )
-                    {
-                        if curr_item_idx != new_item_idx {
-                            trace!(
-                                "Timeline::handle_event(): jumping view from event index {curr_item_idx} to new index {new_item_idx}, scroll {new_item_scroll}, event ID {_event_id}"
-                            );
-                            // Set scrolled_past_read_marker false when we jump to a new event
-                            tl.scrolled_past_read_marker = false;
-                        }
-                    }
-                    //
-                    // TODO: after an (un)ignore user event, all timelines are cleared. Handle that here.
-                    //
-                    else {
-                        // warn!("!!! Couldn't find new event with matching ID for ANY event currently visible in the portal list");
                     }
 
                     if clear_cache {
@@ -553,63 +518,6 @@ impl RoomScreen {
 
         self.show_timeline();
     }
-}
-
-/// Returns info about the item in the list of `new_items` that matches the event ID
-/// of a visible item in the given `curr_items` list.
-///
-/// This info includes a tuple of:
-/// 1. the index of the item in the current items list,
-/// 2. the index of the item in the new items list,
-/// 3. the positional "scroll" offset of the corresponding current item in the portal list,
-/// 4. the unique event ID of the item.
-fn find_new_item_matching_current_item(
-    visible_items: usize,          // DUMMY PARAM TODO CHANGE THIS
-    position_of_item: Option<f64>, // DUMMY PARAM TODO CHANGE THIS
-    starting_at_curr_idx: usize,
-    curr_items: &Vector<Arc<TimelineItem>>,
-    new_items: &Vector<Arc<TimelineItem>>,
-) -> Option<(usize, usize, f64, OwnedEventId)> {
-    let mut curr_item_focus = curr_items.focus();
-    let mut idx_curr = starting_at_curr_idx;
-    let mut curr_items_with_ids: Vec<(usize, OwnedEventId)> = Vec::with_capacity(visible_items);
-
-    // Find all items with real event IDs that are currently visible in the portal list.
-    // TODO: if this is slow, we could limit it to 3-5 events at the most.
-    if curr_items_with_ids.len() <= visible_items {
-        while let Some(curr_item) = curr_item_focus.get(idx_curr) {
-            if let Some(event_id) = curr_item.as_event().and_then(|ev| ev.event_id()) {
-                curr_items_with_ids.push((idx_curr, event_id.to_owned()));
-            }
-            if curr_items_with_ids.len() >= visible_items {
-                break;
-            }
-            idx_curr += 1;
-        }
-    }
-
-    // Find a new item that has the same real event ID as any of the current items.
-    for (idx_new, new_item) in new_items.iter().enumerate() {
-        let Some(event_id) = new_item.as_event().and_then(|ev| ev.event_id()) else {
-            continue;
-        };
-        if let Some((idx_curr, _)) = curr_items_with_ids
-            .iter()
-            .find(|(_, ev_id)| ev_id == event_id)
-        {
-            // Not all items in the portal list are guaranteed to have a position offset,
-            // some may be zeroed-out, so we need to account for that possibility by only
-            // using events that have a real non-zero area
-            if let Some(pos_offset) = position_of_item {
-                trace!(
-                    "Found matching event ID {event_id} at index {idx_new} in new items list, corresponding to current item index {idx_curr} at pos offset {pos_offset}"
-                );
-                return Some((*idx_curr, idx_new, pos_offset, event_id.to_owned()));
-            }
-        }
-    }
-
-    None
 }
 
 #[derive(Debug, Clone, Serialize)]
