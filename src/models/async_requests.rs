@@ -41,6 +41,7 @@ pub enum MatrixRequest {
         /// The maximum number of timeline events to fetch in each pagination batch.
         num_events: u16,
         direction: PaginationDirection,
+        result_sender: Option<oneshot::Sender<Result<bool, matrix_sdk_ui::timeline::Error>>>,
     },
     /// Request to edit the content of an event in the given room's timeline.
     EditMessage {
@@ -239,6 +240,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
                     num_events: data.num_events,
                     direction: data.direction,
+                    result_sender: None,
                 })
             }
             "editMessage" => {
@@ -667,7 +669,7 @@ struct KickOrBanUserFromRoomPayload {
     is_ban: bool,
 }
 
-pub(crate) fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
+pub fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
     if let Some(thread_root_event_id) = root {
         TimelineKind::Thread {
             room_id,

@@ -293,6 +293,7 @@ impl RoomScreen {
                 timeline_kind: tl.kind.clone(),
                 num_events: 50,
                 direction: PaginationDirection::Backwards,
+                result_sender: None,
             });
         }
 
@@ -415,6 +416,7 @@ impl RoomScreen {
                 timeline_kind: tl_state.kind.clone(),
                 num_events: 50,
                 direction: PaginationDirection::Backwards,
+                result_sender: None,
             });
         }
 

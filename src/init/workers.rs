@@ -112,6 +112,7 @@ pub async fn async_worker(
                 timeline_kind,
                 num_events,
                 direction,
+                result_sender,
             } => {
                 let Some((timeline, sender)) = get_timeline_and_sender(&timeline_kind) else {
                     trace!("Skipping pagination request for unknown {timeline_kind}");
@@ -140,14 +141,21 @@ pub async fn async_worker(
                                 fully_paginated,
                                 direction,
                             }).unwrap();
+                            if let Some(sender) = result_sender {
+                                let _ = sender.send(Ok(fully_paginated));
+                            }
                             broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                         Err(error) => {
                             warn!("Error sending {direction} pagination request for room {timeline_kind}: {error:?}");
-                            sender.send(TimelineUpdate::PaginationError {
-                                error,
-                                direction,
-                            }).unwrap();
+                            if let Some(sender) = result_sender {
+                                let _ = sender.send(Err(error));
+                            } else {
+                                sender.send(TimelineUpdate::PaginationError {
+                                    error,
+                                    direction,
+                                }).unwrap();
+                            }
                             broadcast_event(UIUpdateMessage::RefreshUI);
                         }
                     }
@@ -676,6 +684,7 @@ pub async fn async_worker(
                         timeline_kind: TimelineKind::MainRoom { room_id },
                         num_events: 50,
                         direction: PaginationDirection::Backwards,
+                        result_sender: None
                     });
                 });
             }
