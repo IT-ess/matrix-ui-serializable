@@ -415,6 +415,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
 // Re-exports
 
+pub use events::timeline::{PaginationDirection, TimelineKind};
 pub use init::session::FullMatrixSession;
 pub use init::singletons::{CLIENT, LOGIN_STORE_READY};
 pub use models::async_requests::*;

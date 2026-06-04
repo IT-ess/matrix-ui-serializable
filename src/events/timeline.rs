@@ -421,6 +421,7 @@ pub async fn timeline_subscriber_handler(
                                 },
                                 num_events: 50,
                                 direction: PaginationDirection::Backwards,
+                                result_sender: None
                             });
                         }
                 }

@@ -425,9 +425,9 @@ pub fn handle_matrix_uri(uri: &Url) {
 pub async fn fetch_matrix_pill_info(uri: &str) -> anyhow::Result<MatrixUriPillInfo> {
     let intent = get_matrix_uri_intent(uri)?;
     match intent {
-        MatrixUriIntent::Room((room, via, _)) => {
+        MatrixUriIntent::Room((room, via, event_opt)) => {
             let (room_preview, via) = poll_room_preview(room, via).await?;
-            Ok(MatrixUriPillInfo::Room((room_preview, via)))
+            Ok(MatrixUriPillInfo::Room((room_preview, via, event_opt)))
         }
         MatrixUriIntent::User(user_id) => Ok(MatrixUriPillInfo::User(with_user_profile(
             user_id,
