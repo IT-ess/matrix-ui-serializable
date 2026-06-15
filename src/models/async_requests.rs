@@ -209,6 +209,11 @@ pub enum MatrixRequest {
         reason: Option<String>,
         is_ban: bool,
     },
+    BookmarkMessage {
+        room_id: OwnedRoomId,
+        event_id: OwnedEventId,
+        sender_display_name: String,
+    },
 }
 // Deserialize trait is implemented in models/async_requests.rs
 
@@ -445,6 +450,15 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     is_ban: data.is_ban,
                 })
             }
+            "bookmarkMessage" => {
+                let data: BookmarkMessagePayload =
+                    serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
+                Ok(MatrixRequest::BookmarkMessage {
+                    room_id: data.room_id,
+                    event_id: data.event_id,
+                    sender_display_name: data.sender_display_name,
+                })
+            }
             _ => Err(serde::de::Error::unknown_variant(
                 event,
                 &[
@@ -667,6 +681,14 @@ struct KickOrBanUserFromRoomPayload {
     user_id: OwnedUserId,
     reason: Option<String>,
     is_ban: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BookmarkMessagePayload {
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+    sender_display_name: String,
 }
 
 pub fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {

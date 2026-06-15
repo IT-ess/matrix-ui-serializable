@@ -1207,6 +1207,26 @@ pub async fn async_worker(
                     }
                 });
             }
+            MatrixRequest::BookmarkMessage {
+                room_id,
+                event_id,
+                sender_display_name,
+            } => {
+                let Some(room_info) = crate::room::joined_room::try_get_room_details(&room_id)
+                else {
+                    error!("Cannot get room where the event was bookmarked");
+                    continue;
+                };
+                let _bookmark_task = Handle::current().spawn(async move {
+                    let timeline = room_info.lock().unwrap().main_timeline.timeline.clone();
+
+                    timeline
+                        .room()
+                        .bookmark_event(&event_id, &sender_display_name)
+                        .await
+                        .unwrap();
+                });
+            }
         }
     }
 

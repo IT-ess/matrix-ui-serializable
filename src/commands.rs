@@ -35,6 +35,7 @@ use std::{sync::Arc, time::Duration};
 use tracing::{error, info};
 use url::Url;
 
+pub use crate::models::misc::FrontendIndexedBookmark;
 pub use crate::room::preview::SerializableRoomPreview;
 pub use crate::{
     init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent,
@@ -442,6 +443,26 @@ pub async fn get_matrix_to_permalink_for_room(room_id: OwnedRoomId) -> anyhow::R
     let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
     room.matrix_to_permalink().await.map_err(Into::into)
+}
+
+pub async fn search_bookmarks(
+    query: &str,
+    max_number_of_results: usize,
+    pagination_offset: Option<usize>,
+    room_id_filter: Option<OwnedRoomId>,
+) -> anyhow::Result<Vec<FrontendIndexedBookmark>> {
+    let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
+    Ok(client
+        .search_bookmarks(
+            query,
+            max_number_of_results,
+            pagination_offset,
+            room_id_filter.as_deref(),
+        )
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
 }
 
 pub async fn register_notifications(
