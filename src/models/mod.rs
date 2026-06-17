@@ -5,6 +5,7 @@ pub mod event_bridge;
 pub mod events;
 pub mod matrix_uri;
 pub mod misc;
+pub mod notification;
 pub mod profile;
 pub(crate) mod room_display_name;
 pub mod state_updater;

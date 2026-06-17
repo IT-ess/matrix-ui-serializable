@@ -3,6 +3,7 @@ use matrix_sdk::{
     Client, ThreadingSupport, config::RequestConfig, encryption::EncryptionSettings,
     sliding_sync::VersionBuilder,
 };
+use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
 
 use rand::{RngExt, distr::Alphanumeric, rng};
 
@@ -58,6 +59,7 @@ pub(crate) async fn login_and_persist_matrix_session(
 pub async fn build_client(
     homeserver_opt: Option<String>,
     client_session: Option<ClientSession>,
+    cross_process_holder: Option<&str>,
 ) -> anyhow::Result<(Client, ClientSession)> {
     let (homeserver, db_path, passphrase, db_identifier) = match client_session {
         Some(s) => {
@@ -95,7 +97,7 @@ pub async fn build_client(
         }
     };
 
-    let client = Client::builder()
+    let mut builder = Client::builder()
         .server_name_or_homeserver_url(homeserver.clone())
         .with_threading_support(ThreadingSupport::Enabled {
             with_subscriptions: false,
@@ -109,9 +111,17 @@ pub async fn build_client(
         })
         .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens()
-        .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)))
-        .build()
-        .await?;
+        .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)));
+
+    // When the client runs in a separate process (e.g. the mobile notification
+    // service that decrypts a single push event), it must use a cross-process
+    // store lock holder name distinct from the main app's default ("main"),
+    // otherwise concurrent writes to the shared crypto store can collide.
+    if let Some(holder) = cross_process_holder {
+        builder = builder.cross_process_store_config(CrossProcessLockConfig::multi_process(holder));
+    }
+
+    let client = builder.build().await?;
 
     add_event_handlers(&client);
 

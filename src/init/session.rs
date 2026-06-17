@@ -126,7 +126,7 @@ pub async fn restore_client_from_session(session: FullMatrixSession) -> anyhow::
         user_session,
     } = session;
 
-    let (client, _) = build_client(None, Some(client_session)).await?;
+    let (client, _) = build_client(None, Some(client_session), None).await?;
 
     client.restore_session(user_session).await?;
 
