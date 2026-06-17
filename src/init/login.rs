@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use matrix_sdk::{
-    Client, ThreadingSupport, config::RequestConfig, encryption::EncryptionSettings,
+    Client, ThreadingSupport, bookmark_index::BookmarkIndexStoreKind, config::RequestConfig,
+    encryption::EncryptionSettings, search_index::SearchIndexStoreKind,
     sliding_sync::VersionBuilder,
 };
 
@@ -59,13 +60,10 @@ pub async fn build_client(
     homeserver_opt: Option<String>,
     client_session: Option<ClientSession>,
 ) -> anyhow::Result<(Client, ClientSession)> {
+    let base_path = APP_DATA_DIR.wait().clone();
     let (homeserver, db_path, passphrase, db_identifier) = match client_session {
         Some(s) => {
-            let db_path = APP_DATA_DIR
-                .wait()
-                .clone()
-                .join("matrix-db")
-                .join(&s.db_identifier);
+            let db_path = base_path.join("matrix-db").join(&s.db_identifier);
             (s.homeserver, db_path, s.passphrase, s.db_identifier)
         }
         None => {
@@ -75,11 +73,8 @@ pub async fn build_client(
                     .take(7)
                     .map(char::from)
                     .collect();
-                let db_path = APP_DATA_DIR
-                    .wait()
-                    .clone()
-                    .join("matrix-db")
-                    .join(&db_identifier);
+
+                let db_path = base_path.join("matrix-db").join(&db_identifier);
 
                 std::fs::create_dir_all(&db_path)?;
 
@@ -94,6 +89,9 @@ pub async fn build_client(
             }
         }
     };
+
+    let search_indexes_path = base_path.join("matrix-indexes");
+    let bookmarks_path = base_path.join("matrix-bookmarks");
 
     let client = Client::builder()
         .server_name_or_homeserver_url(homeserver.clone())
@@ -110,6 +108,10 @@ pub async fn build_client(
         .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens()
         .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)))
+        .search_index_store(SearchIndexStoreKind::UnencryptedDirectory(
+            search_indexes_path,
+        ))
+        .bookmark_index_store(BookmarkIndexStoreKind::UnencryptedDirectory(bookmarks_path))
         .build()
         .await?;
 

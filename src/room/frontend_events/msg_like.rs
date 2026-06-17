@@ -94,6 +94,10 @@ pub struct FrontendMsgLikeContent {
     pub sender: Option<String>,
     /// Sender id of the event
     pub sender_id: String,
+    /// Whether this event is currently bookmarked (as defined by [MSC4482]).
+    ///
+    /// [MSC4482]: <https://github.com/matrix-org/matrix-spec-proposals/pull/4482>
+    pub bookmarked: bool,
 }
 
 // Wrap ReactionsByKeyBySender, and implement Serialize on it

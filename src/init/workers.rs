@@ -984,19 +984,19 @@ pub async fn async_worker(
             }
             MatrixRequest::ToggleReaction {
                 timeline_kind,
-                timeline_event_id,
+                timeline_event_item_id,
                 reaction,
             } => {
                 let Some(timeline) = get_timeline(&timeline_kind) else {
                     error!(
-                        "BUG: {timeline_kind} not found when sending reaction, {timeline_event_id:?}"
+                        "BUG: {timeline_kind} not found when sending reaction, {timeline_event_item_id:?}"
                     );
                     continue;
                 };
 
                 let _toggle_reaction_task = Handle::current().spawn(async move {
                     debug!("Toggle Reaction to room {timeline_kind}: ...");
-                    match timeline.toggle_reaction(&timeline_event_id, &reaction).await {
+                    match timeline.toggle_reaction(&timeline_event_item_id, &reaction).await {
                         Ok(_send_handle) => {
                             broadcast_event(UIUpdateMessage::RefreshUI);
                             debug!("Sent toggle reaction to room {timeline_kind} {reaction}.")
@@ -1007,18 +1007,21 @@ pub async fn async_worker(
             }
             MatrixRequest::RedactMessage {
                 timeline_kind,
-                timeline_event_id,
+                timeline_event_item_id,
                 reason,
             } => {
                 let Some(timeline) = get_timeline(&timeline_kind) else {
                     error!(
-                        "BUG: {timeline_kind} not found when redacting message, {timeline_event_id:?}"
+                        "BUG: {timeline_kind} not found when redacting message, {timeline_event_item_id:?}"
                     );
                     continue;
                 };
 
                 let _redact_task = Handle::current().spawn(async move {
-                    match timeline.redact(&timeline_event_id, reason.as_deref()).await {
+                    match timeline
+                        .redact(&timeline_event_item_id, reason.as_deref())
+                        .await
+                    {
                         Ok(()) => {
                             debug!("Successfully redacted message in room {timeline_kind}.");
                             enqueue_toast_notification(ToastNotificationRequest::new(
@@ -1207,10 +1210,10 @@ pub async fn async_worker(
                     }
                 });
             }
-            MatrixRequest::BookmarkMessage {
+            MatrixRequest::ToggleBookmarkMessage {
                 room_id,
-                event_id,
-                sender_display_name,
+                timeline_event_item_id,
+                was_bookmarked,
             } => {
                 let Some(room_info) = crate::room::joined_room::try_get_room_details(&room_id)
                 else {
@@ -1220,11 +1223,19 @@ pub async fn async_worker(
                 let _bookmark_task = Handle::current().spawn(async move {
                     let timeline = room_info.lock().unwrap().main_timeline.timeline.clone();
 
-                    timeline
-                        .room()
-                        .bookmark_event(&event_id, &sender_display_name)
-                        .await
-                        .unwrap();
+                    let result = if was_bookmarked {
+                        timeline.unbookmark_event(&timeline_event_item_id).await
+                    } else {
+                        timeline.bookmark_event(&timeline_event_item_id).await
+                    };
+                    if let Err(e) = result {
+                        error!("An error happened while toggling bookmark state of item {timeline_event_item_id:?}. {e}");
+                        enqueue_toast_notification(ToastNotificationRequest::new(
+                            format!("Error while toggling bookmark. {e}"),
+                            Some(format!("Error: {e:?}")),
+                            ToastNotificationVariant::Error,
+                        ));
+                    }
                 });
             }
         }

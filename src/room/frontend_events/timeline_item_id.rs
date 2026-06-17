@@ -56,28 +56,19 @@ impl<'de> Deserialize<'de> for FrontendTimelineEventItemId {
         // First deserialize into a generic Value to inspect the structure
         let value = Value::deserialize(deserializer)?;
 
-        // Extract the "id" field first
-        let id = value
-            .get("timelineItemId")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| serde::de::Error::missing_field("timelineItemId"))?;
-
-        // Extract the "payload" field containing the variant data
-        let is_local = value
-            .get("isLocal")
-            .and_then(|v| v.as_bool())
-            .ok_or_else(|| serde::de::Error::missing_field("isLocal"))?;
-
-        if is_local {
-            let owned_id = OwnedTransactionId::from(id);
-            Ok(FrontendTimelineEventItemId::from(
-                TimelineEventItemId::TransactionId(owned_id),
-            ))
-        } else {
-            let owned_id = OwnedEventId::try_from(id).map_err(serde::de::Error::custom)?;
-            Ok(FrontendTimelineEventItemId::from(
-                TimelineEventItemId::EventId(owned_id),
-            ))
+        match value {
+            Value::String(s) => {
+                if let Ok(id) = OwnedEventId::try_from(s.clone()) {
+                    Ok(FrontendTimelineEventItemId::from(
+                        TimelineEventItemId::EventId(id),
+                    ))
+                } else {
+                    Ok(FrontendTimelineEventItemId::from(
+                        TimelineEventItemId::TransactionId(OwnedTransactionId::from(s)),
+                    ))
+                }
+            }
+            _value => Err(serde::de::Error::custom("Only support strings")),
         }
     }
 }

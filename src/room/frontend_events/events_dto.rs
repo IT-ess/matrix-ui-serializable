@@ -262,6 +262,7 @@ pub(super) fn map_timeline_event_item_content(
                 .thread_summary
                 .clone()
                 .and_then(get_frontend_thread_summary);
+            let bookmarked = msg_like.bookmarked;
             match msg_like.kind.clone() {
                 MsgLikeKind::Message(message) => Some(FrontendTimelineItem {
                     unique_id,
@@ -280,6 +281,7 @@ pub(super) fn map_timeline_event_item_content(
                         thread_summary,
                         in_reply_to_id,
                         kind: map_msg_event_content(message.msgtype().clone()),
+                        bookmarked,
                     }),
                 }),
                 MsgLikeKind::Sticker(sticker) => Some(FrontendTimelineItem {
@@ -301,6 +303,7 @@ pub(super) fn map_timeline_event_item_content(
                         kind: FrontendMsgLikeKind::Sticker(Box::new(
                             FrontendStickerEventContent::from(sticker.content().clone()),
                         )),
+                        bookmarked,
                     }),
                 }),
                 MsgLikeKind::Redacted => Some(FrontendTimelineItem {
@@ -320,6 +323,7 @@ pub(super) fn map_timeline_event_item_content(
                         thread_summary,
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Redacted,
+                        bookmarked,
                     }),
                 }),
                 MsgLikeKind::UnableToDecrypt(_) => Some(FrontendTimelineItem {
@@ -339,6 +343,7 @@ pub(super) fn map_timeline_event_item_content(
                         thread_summary,
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::UnableToDecrypt,
+                        bookmarked,
                     }),
                 }),
                 // TODO: map locations
@@ -361,6 +366,7 @@ pub(super) fn map_timeline_event_item_content(
                         thread_summary,
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Poll,
+                        bookmarked,
                     }),
                 }),
 
@@ -381,6 +387,7 @@ pub(super) fn map_timeline_event_item_content(
                         thread_summary,
                         in_reply_to_id,
                         kind: FrontendMsgLikeKind::Unknown,
+                        bookmarked,
                     }),
                 }),
             }

@@ -173,14 +173,14 @@ pub enum MatrixRequest {
     /// Toggles the given reaction to the given event in the given room.
     ToggleReaction {
         timeline_kind: TimelineKind,
-        timeline_event_id: TimelineEventItemId,
+        timeline_event_item_id: TimelineEventItemId,
         reaction: String,
     },
     /// Redacts (deletes) the given event in the given room.
     #[doc(alias("delete"))]
     RedactMessage {
         timeline_kind: TimelineKind,
-        timeline_event_id: TimelineEventItemId,
+        timeline_event_item_id: TimelineEventItemId,
         reason: Option<String>,
     },
     SearchUsers {
@@ -209,10 +209,10 @@ pub enum MatrixRequest {
         reason: Option<String>,
         is_ban: bool,
     },
-    BookmarkMessage {
+    ToggleBookmarkMessage {
         room_id: OwnedRoomId,
-        event_id: OwnedEventId,
-        sender_display_name: String,
+        timeline_event_item_id: TimelineEventItemId,
+        was_bookmarked: bool,
     },
 }
 // Deserialize trait is implemented in models/async_requests.rs
@@ -398,10 +398,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::ToggleReaction {
                     timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
-                    timeline_event_id: TimelineEventItemId::EventId(
-                        OwnedEventId::try_from(data.timeline_event_id)
-                            .expect("Frontend sent incorrect event id"),
-                    ), // We only use eventId, not transactions.
+                    timeline_event_item_id: data.timeline_event_item_id.inner(),
                     reaction: data.reaction,
                 })
             }
@@ -410,7 +407,7 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
                 Ok(MatrixRequest::RedactMessage {
                     timeline_kind: get_timeline_kind(data.room_id, data.thread_root_event_id),
-                    timeline_event_id: TimelineEventItemId::EventId(data.timeline_event_id),
+                    timeline_event_item_id: data.timeline_event_item_id.inner(),
                     reason: data.reason,
                 })
             }
@@ -450,13 +447,13 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     is_ban: data.is_ban,
                 })
             }
-            "bookmarkMessage" => {
-                let data: BookmarkMessagePayload =
+            "toggleBookmarkMessage" => {
+                let data: ToggleBookmarkMessagePayload =
                     serde_json::from_value(payload.clone()).map_err(serde::de::Error::custom)?;
-                Ok(MatrixRequest::BookmarkMessage {
+                Ok(MatrixRequest::ToggleBookmarkMessage {
                     room_id: data.room_id,
-                    event_id: data.event_id,
-                    sender_display_name: data.sender_display_name,
+                    timeline_event_item_id: data.timeline_event_item_id.inner(),
+                    was_bookmarked: data.was_bookmarked,
                 })
             }
             _ => Err(serde::de::Error::unknown_variant(
@@ -482,11 +479,11 @@ impl<'de> Deserialize<'de> for MatrixRequest {
                     "getRoomPowerLevels",
                     "toggleReaction",
                     "redactMessage",
-                    // "getMatrixRoomLinkPillInfo",
                     "createDMRoom",
                     "createRoom",
                     "inviteUsersInRoom",
                     "kickOrBanUserFromRoom",
+                    "toggleBookmarkMessage",
                 ],
             )),
         }
@@ -638,7 +635,7 @@ struct GetRoomPowerLevelsPayload {
 struct ToggleReactionPayload {
     room_id: OwnedRoomId,
     thread_root_event_id: Option<OwnedEventId>,
-    timeline_event_id: String,
+    timeline_event_item_id: FrontendTimelineEventItemId,
     reaction: String,
 }
 
@@ -647,7 +644,7 @@ struct ToggleReactionPayload {
 struct RedactMessagePayload {
     room_id: OwnedRoomId,
     thread_root_event_id: Option<OwnedEventId>,
-    timeline_event_id: OwnedEventId,
+    timeline_event_item_id: FrontendTimelineEventItemId,
     reason: Option<String>,
 }
 
@@ -685,10 +682,10 @@ struct KickOrBanUserFromRoomPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BookmarkMessagePayload {
+struct ToggleBookmarkMessagePayload {
     room_id: OwnedRoomId,
-    event_id: OwnedEventId,
-    sender_display_name: String,
+    timeline_event_item_id: FrontendTimelineEventItemId,
+    was_bookmarked: bool,
 }
 
 pub fn get_timeline_kind(room_id: OwnedRoomId, root: Option<OwnedEventId>) -> TimelineKind {
