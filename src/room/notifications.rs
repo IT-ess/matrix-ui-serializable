@@ -4,7 +4,7 @@ use crate::{
     models::events::{EmitEvent, ToastNotificationRequest},
 };
 use crossbeam_queue::SegQueue;
-use matrix_sdk::Client;
+use matrix_sdk::{Client, ruma::events::AnySyncTimelineEvent};
 
 // Platform imports
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -15,7 +15,7 @@ use matrix_sdk::ruma::api::client::push::{Pusher, PusherIds, PusherInit, PusherK
 use matrix_sdk::{
     Room,
     notification_settings::{NotificationSettings, RoomNotificationMode},
-    ruma::{MilliSecondsSinceUnixEpoch, events::AnySyncTimelineEvent, serde::Raw},
+    ruma::{MilliSecondsSinceUnixEpoch, serde::Raw},
 };
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use serde_json::{Map, json};
@@ -286,7 +286,6 @@ pub async fn parse_full_notification(
     Ok((summary, body, server_ts))
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
     use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
 
@@ -332,8 +331,7 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn truncate(s: String) -> String {
+pub fn truncate(s: String) -> String {
     use unicode_segmentation::UnicodeSegmentation;
 
     static MAX_LENGTH: usize = 5000;

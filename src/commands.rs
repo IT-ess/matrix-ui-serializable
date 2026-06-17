@@ -59,7 +59,7 @@ use tokio::{sync::oneshot, time::sleep};
 /// Try to build the client from the url given by the frontend and set its singleton.
 /// Once called, the client is set and the init process can proceed (by calling check_homeserver_auth_type)
 pub async fn build_temp_client_from_homeserver_url(homeserver: String) -> crate::Result<()> {
-    let (client, client_session) = build_client(Some(homeserver), None).await?;
+    let (client, client_session) = build_client(Some(homeserver), None, None).await?;
     {
         let mut temp_session = TEMP_CLIENT_SESSION.lock().unwrap();
         *temp_session = Some(client_session);
@@ -466,4 +466,138 @@ pub async fn register_notifications(
     crate::room::notifications::register_os_desktop_notifications(client).await;
 
     Ok(())
+}
+
+/// Resolve and decrypt a single push notification from a background process.
+///
+/// This is meant to be called from a native, UI-less entry point (e.g. an iOS
+/// Notification Service Extension or an Android background service) when a
+/// silent push containing only a `room_id` and `event_id` is received, possibly
+/// while the main app is killed. It is fully self-contained: it does **not**
+/// rely on [`crate::init`], the global singletons, the sync service, the
+/// `StateUpdater` or the event bridge.
+///
+/// It restores a lightweight client from the stored session (using a distinct
+/// cross-process store lock holder so it can run alongside a live main app),
+/// then uses [`matrix_sdk_ui::notification_client::NotificationClient`] to fetch
+/// and decrypt the event, returning display-ready content for the caller to turn
+/// into an OS notification.
+///
+/// * `session` — the serialized `FullMatrixSession` stored by the adapter (the
+///   same string passed to `LibConfig`).
+/// * `app_data_dir` — the application data directory (same as `LibConfig`).
+///
+/// If the access/refresh tokens were rotated while resolving the notification,
+/// the returned [`FrontendNotificationResult::refreshed_session`] holds an
+/// updated serialized session that the caller must persist.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn get_notification_item(
+    session: String,
+    app_data_dir: std::path::PathBuf,
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+) -> crate::Result<crate::models::notification::FrontendNotificationResult> {
+    use crate::{
+        init::session::FullMatrixSession,
+        init::singletons::APP_DATA_DIR,
+        models::notification::{
+            FrontendNotificationItem, FrontendNotificationResult, FrontendNotificationStatus,
+        },
+        room::notifications::{event_notification_body, truncate},
+    };
+    use matrix_sdk_ui::notification_client::{
+        NotificationClient, NotificationEvent, NotificationProcessSetup, NotificationStatus,
+    };
+
+    // The background process is fresh, so APP_DATA_DIR is unset; `build_client`
+    // waits on it. Ignore the error in case it was already set.
+    let _ = APP_DATA_DIR.set(app_data_dir);
+
+    let FullMatrixSession {
+        client_session,
+        user_session,
+    } = serde_json::from_str(&session).map_err(anyhow::Error::from)?;
+
+    // Build a client sharing the same on-disk store as the main app, but with a
+    // distinct cross-process lock holder name. Do not set the CLIENT singleton
+    // or start any sync/worker: this client is local to this call.
+    let (client, client_session) =
+        build_client(None, Some(client_session), Some("notifications")).await?;
+    client.restore_session(user_session).await?;
+
+    // Watch for token rotation during the notification fetch so we can hand the
+    // refreshed session back to the caller for persistence.
+    let mut session_changes = client.subscribe_to_session_changes();
+
+    let notification_client =
+        NotificationClient::new(client.clone(), NotificationProcessSetup::MultipleProcesses)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+    let status = notification_client
+        .get_notification(&room_id, &event_id)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    let status = match status {
+        NotificationStatus::Event(item) => {
+            let item = *item;
+            let sender_name = item
+                .sender_display_name
+                .clone()
+                .unwrap_or_else(|| item.event.sender().localpart().to_owned());
+
+            let body = match &item.event {
+                NotificationEvent::Timeline(event) => {
+                    event_notification_body(event, &sender_name).map(truncate)
+                }
+                NotificationEvent::Invite(_) => Some(format!("{sender_name} invited you to chat.")),
+            };
+
+            let summary = if item.is_direct_message_room {
+                sender_name
+            } else {
+                format!("{sender_name} in {}", item.room_computed_display_name)
+            };
+
+            FrontendNotificationStatus::Event(FrontendNotificationItem {
+                summary,
+                body,
+                sender_display_name: item.sender_display_name,
+                sender_avatar_url: item.sender_avatar_url,
+                room_display_name: item.room_computed_display_name,
+                room_avatar_url: item.room_avatar_url,
+                is_dm: item.is_direct_message_room,
+                is_noisy: item.is_noisy,
+                has_mention: item.has_mention,
+                thread_id: item.thread_id,
+            })
+        }
+        NotificationStatus::EventNotFound => FrontendNotificationStatus::NotFound,
+        NotificationStatus::EventFilteredOut => FrontendNotificationStatus::FilteredOut,
+        NotificationStatus::EventRedacted => FrontendNotificationStatus::Redacted,
+    };
+
+    // Drain any session change that happened during the fetch.
+    let mut tokens_refreshed = false;
+    while let Ok(change) = session_changes.try_recv() {
+        if matches!(change, matrix_sdk::SessionChange::TokensRefreshed) {
+            tokens_refreshed = true;
+        }
+    }
+
+    let refreshed_session = if tokens_refreshed {
+        client
+            .session()
+            .map(|auth| serde_json::to_string(&FullMatrixSession::new(client_session, auth)))
+            .transpose()
+            .map_err(anyhow::Error::from)?
+    } else {
+        None
+    };
+
+    Ok(FrontendNotificationResult {
+        status,
+        refreshed_session,
+    })
 }
