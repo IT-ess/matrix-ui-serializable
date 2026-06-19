@@ -39,7 +39,7 @@ pub async fn to_matrix_bookmark_item(
     room: &Room,
     event: TimelineEvent,
 ) -> Option<MatrixBookmarkItem> {
-    let event_id = event.event_id()?;
+    let event_id = event.event_id()?.to_owned();
     let sender_id = event.sender()?;
     let timestamp = event.timestamp.map(|t| t.0);
     let sender_info = with_user_profile(
