@@ -1,4 +1,5 @@
 pub(crate) mod events_dto;
+pub(crate) mod matrix_bookmarks;
 pub(crate) mod msg_like;
 pub(crate) mod state_event;
 pub(super) mod thread_summary;

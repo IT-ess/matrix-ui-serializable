@@ -1,5 +1,4 @@
 use bitflags::bitflags;
-use std::sync::Arc;
 
 use matrix_sdk::ruma::{OwnedEventId, UInt, event_id, events::room::message::MessageType};
 use matrix_sdk_ui::timeline::{
@@ -66,7 +65,7 @@ pub struct FrontendTimelineErrorItem {
 }
 
 pub fn to_frontend_timeline_item(
-    item: &Arc<TimelineItem>,
+    item: &TimelineItem,
     timeline_kind: &TimelineKind,
     user_power_levels: &UserPowerLevels,
 ) -> Option<FrontendTimelineItem> {

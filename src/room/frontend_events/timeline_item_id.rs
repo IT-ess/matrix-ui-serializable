@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStru
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
-pub struct FrontendTimelineEventItemId(TimelineEventItemId);
+pub struct FrontendTimelineEventItemId(pub(super) TimelineEventItemId);
 
 impl FrontendTimelineEventItemId {
     pub fn inner(self) -> TimelineEventItemId {

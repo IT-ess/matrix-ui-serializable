@@ -19,7 +19,10 @@ use crate::{
         state_updater::StateUpdater,
     },
     room::{
-        frontend_events::events_dto::{FrontendTimelineItem, map_event_timeline_item},
+        frontend_events::{
+            events_dto::{FrontendTimelineItem, map_event_timeline_item},
+            matrix_bookmarks::to_matrix_bookmark_item,
+        },
         joined_room::get_timeline,
         preview::{CachedRoomPreview, get_or_fetch_room_preview},
         rooms_list::{RoomsListUpdate, enqueue_rooms_list_update},
@@ -28,6 +31,7 @@ use crate::{
     utils::guess_device_type,
 };
 use anyhow::anyhow;
+use futures::future::join_all;
 use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use mime::Mime;
 use rand::{RngExt, distr::Alphanumeric, rng};
@@ -35,21 +39,23 @@ use std::{sync::Arc, time::Duration};
 use tracing::{error, info};
 use url::Url;
 
-pub use crate::models::misc::FrontendIndexedBookmark;
 pub use crate::room::preview::SerializableRoomPreview;
 pub use crate::{
     init::FrontendAuthTypeResponse, models::events::VerifyDeviceEvent,
     models::matrix_uri::MatrixUriPillInfo,
+    room::frontend_events::matrix_bookmarks::MatrixBookmarkItem,
 };
 pub use matrix_sdk::ruma::{
     MatrixToUri, MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedEventId, OwnedRoomId,
     OwnedServerName, OwnedUserId, UInt, UserId,
 };
 use matrix_sdk::{
+    Room,
     attachment::{AttachmentInfo, Thumbnail},
+    bookmarks::BookmarkSearchIterator,
     encryption::CrossSigningResetAuthType,
     ruma::{
-        DeviceId, OwnedMxcUri, OwnedRoomOrAliasId,
+        DeviceId, OwnedMxcUri, OwnedRoomOrAliasId, RoomId,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
         events::room::message::TextMessageEventContent,
     },
@@ -445,24 +451,43 @@ pub async fn get_matrix_to_permalink_for_room(room_id: OwnedRoomId) -> anyhow::R
     room.matrix_to_permalink().await.map_err(Into::into)
 }
 
-pub async fn search_bookmarks(
-    query: &str,
-    max_number_of_results: usize,
-    pagination_offset: Option<usize>,
-    room_id_filter: Option<OwnedRoomId>,
-) -> anyhow::Result<Vec<FrontendIndexedBookmark>> {
+fn get_search_bookmark_iterator_for_room(
+    query: String,
+    room_id: &RoomId,
+    batch_size: usize,
+) -> anyhow::Result<(BookmarkSearchIterator, Room)> {
     let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
-    Ok(client
-        .search_bookmarks(
-            query,
-            max_number_of_results,
-            pagination_offset,
-            room_id_filter.as_deref(),
-        )
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    let room = client.get_room(room_id).ok_or(anyhow!("Cannot get room"))?;
+    Ok((room.search_room_bookmarks_iterator(query, batch_size), room))
+}
+
+pub async fn search_bookmarks_in_room(
+    query: String,
+    batch_size: usize,
+    page: usize,
+    room_id: OwnedRoomId,
+) -> anyhow::Result<Vec<MatrixBookmarkItem>> {
+    // TODO: do not use this iterator because this isn't really handy and performant.
+    let (mut iterator, room) = get_search_bookmark_iterator_for_room(query, &room_id, batch_size)?;
+
+    let mut current_page = 0;
+
+    while let Ok(Some(batch)) = iterator.next_events().await {
+        if current_page < page {
+            current_page += 1;
+            continue;
+        } else {
+            tracing::warn!("I'M A BATCH {batch:?}");
+            let mut futures = Vec::new();
+            for (index, item) in batch.into_iter().enumerate() {
+                futures.push(to_matrix_bookmark_item(index.to_string(), &room, item));
+            }
+            let res = join_all(futures).await;
+            return Ok(res.into_iter().flatten().collect());
+        }
+    }
+
+    Ok(Vec::new()) // Empty results, nothing has been found
 }
 
 pub async fn register_notifications(
