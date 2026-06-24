@@ -132,9 +132,11 @@ impl LibConfig {
 /// Function to be called once your app is starting to init this lib.
 /// This will start the workers and return a `Receiver` to forward outgoing events.
 pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
-    APP_DATA_DIR
-        .set(config.app_data_dir)
-        .expect("Couldn't set app data dir");
+    // On Android the silent-push (cold) notification path may already have set
+    // `APP_DATA_DIR` to the same value if this process previously handled a push
+    // and is now being reused to launch the app. Tolerate that instead of
+    // panicking (it is the identical data dir). See `get_notification_item`.
+    let _ = APP_DATA_DIR.set(config.app_data_dir);
 
     // Lib -> adapter events
     let (event_bridge, broadcast_receiver) = EventBridge::new();
