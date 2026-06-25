@@ -467,8 +467,40 @@ pub async fn search_bookmarks_in_room(
     page: usize,
     room_id: OwnedRoomId,
 ) -> anyhow::Result<Vec<MatrixBookmarkItem>> {
-    // TODO: do not use this iterator because this isn't really handy and performant.
     let (mut iterator, room) = get_search_bookmark_iterator_for_room(query, &room_id, batch_size)?;
+
+    let mut current_page = 0;
+
+    let room_arc = Arc::new(room);
+
+    while let Ok(Some(batch)) = iterator.next_events().await {
+        if current_page < page {
+            current_page += 1;
+            continue;
+        } else {
+            let mut futures = Vec::new();
+            for (index, item) in batch.into_iter().enumerate() {
+                futures.push(to_matrix_bookmark_item(
+                    index.to_string(),
+                    room_arc.clone(),
+                    item,
+                ));
+            }
+            let res = join_all(futures).await;
+            return Ok(res.into_iter().flatten().collect());
+        }
+    }
+
+    Ok(Vec::new()) // Empty results, nothing has been found
+}
+
+pub async fn search_bookmarks_globally(
+    query: String,
+    batch_size: usize,
+    page: usize,
+) -> anyhow::Result<Vec<MatrixBookmarkItem>> {
+    let client = CLIENT.get().ok_or(anyhow!("Client not available"))?;
+    let mut iterator = client.search_bookmarks(query, batch_size).build();
 
     let mut current_page = 0;
 
@@ -477,10 +509,15 @@ pub async fn search_bookmarks_in_room(
             current_page += 1;
             continue;
         } else {
-            tracing::warn!("I'M A BATCH {batch:?}");
             let mut futures = Vec::new();
-            for (index, item) in batch.into_iter().enumerate() {
-                futures.push(to_matrix_bookmark_item(index.to_string(), &room, item));
+            for (index, (room_id, event)) in batch.into_iter().enumerate() {
+                if let Some(room) = client.get_room(&room_id) {
+                    futures.push(to_matrix_bookmark_item(
+                        index.to_string(),
+                        Arc::new(room),
+                        event,
+                    ));
+                }
             }
             let res = join_all(futures).await;
             return Ok(res.into_iter().flatten().collect());

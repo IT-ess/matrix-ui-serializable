@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use matrix_sdk::{
     Room,
     deserialized_responses::TimelineEvent,
@@ -36,7 +38,7 @@ pub struct MatrixBookmarkItem {
 
 pub async fn to_matrix_bookmark_item(
     unique_id: String,
-    room: &Room,
+    room: Arc<Room>,
     event: TimelineEvent,
 ) -> Option<MatrixBookmarkItem> {
     let event_id = event.event_id()?.to_owned();
@@ -53,7 +55,7 @@ pub async fn to_matrix_bookmark_item(
             )
         },
     );
-    let item_content = TimelineItemContent::from_event(room, event).await?;
+    let item_content = TimelineItemContent::from_event(&room, event).await?;
     let item = map_timeline_event_item_content(
         &item_content,
         unique_id,
