@@ -47,10 +47,11 @@ pub use matrix_sdk::ruma::{
 use matrix_sdk::{
     attachment::{AttachmentInfo, Thumbnail},
     encryption::CrossSigningResetAuthType,
+    media::MediaRequestParameters,
     ruma::{
         DeviceId, OwnedMxcUri, OwnedRoomOrAliasId,
         api::client::uiaa::{self, MatrixUserIdentifier, UserIdentifier},
-        events::room::message::TextMessageEventContent,
+        events::room::{MediaSource, message::TextMessageEventContent},
     },
 };
 
@@ -490,7 +491,7 @@ pub async fn register_notifications(
 /// If the access/refresh tokens were rotated while resolving the notification,
 /// the returned [`FrontendNotificationResult::refreshed_session`] holds an
 /// updated serialized session that the caller must persist.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+// #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn get_notification_item(
     session: String,
     app_data_dir: std::path::PathBuf,
@@ -560,11 +561,27 @@ pub async fn get_notification_item(
                 format!("{sender_name} in {}", item.room_computed_display_name)
             };
 
+            let sender_avatar = if let Some(mxc_uri) = item.sender_avatar_url {
+                client
+                    .media()
+                    .get_media_content(
+                        &MediaRequestParameters {
+                            source: MediaSource::Plain(OwnedMxcUri::from(mxc_uri)),
+                            format: matrix_sdk::media::MediaFormat::File,
+                        },
+                        true,
+                    )
+                    .await
+                    .ok() // We ignore the error
+            } else {
+                None
+            };
+
             FrontendNotificationStatus::Event(FrontendNotificationItem {
                 summary,
                 body,
                 sender_display_name: item.sender_display_name,
-                sender_avatar_url: item.sender_avatar_url,
+                sender_avatar,
                 room_display_name: item.room_computed_display_name,
                 room_avatar_url: item.room_avatar_url,
                 is_dm: item.is_direct_message_room,
