@@ -26,6 +26,10 @@ pub enum FrontendNotificationStatus {
     FilteredOut,
     /// The event was redacted and has no meaningful content.
     Redacted,
+    /// When no session has been found to decrypt this notification
+    InvalidSession,
+    /// The received payload has not been parsed correctly
+    WrongPayload,
 }
 
 /// The full result returned by [`crate::commands::get_notification_item`].
@@ -53,8 +57,8 @@ pub struct FrontendNotificationItem {
     pub body: Option<String>,
     /// Display name of the sender, if known.
     pub sender_display_name: Option<String>,
-    /// MXC URL of the sender's avatar, if any.
-    pub sender_avatar_url: Option<String>,
+    /// Sender's avatar buffer, if any.
+    pub sender_avatar: Option<Vec<u8>>,
     /// Computed display name of the room.
     pub room_display_name: String,
     /// MXC URL of the room's avatar, if any.
