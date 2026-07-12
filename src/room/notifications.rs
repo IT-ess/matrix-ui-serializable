@@ -109,26 +109,11 @@ fn get_http_pusher(
     // For iOS we define here the content of the notification.
     // For android, it is defined server-side.
     if cfg!(target_os = "ios") {
-        // Poor localization of the alert, to be improved
-        let title = if user_language.eq("fr") {
-            "Nouveau message"
-        } else {
-            "New message"
-        };
-        let body = if user_language.eq("fr") {
-            "Appuyez pour voir le message"
-        } else {
-            "Tap to view message"
-        };
-
         let default_payload = json!( {
           "aps": {
               "mutable-content": 1,
               "content-available": 1,
-              "alert": {
-                  "title": title,
-                  "body": body
-              }
+              "alert": {"loc-key": "SINGLE_UNREAD", "loc-args": []}
           }
         });
         let mut pusher_data = Map::new();
