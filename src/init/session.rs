@@ -126,7 +126,12 @@ pub async fn restore_client_from_session(session: FullMatrixSession) -> anyhow::
         user_session,
     } = session;
 
-    let (client, _) = build_client(None, Some(client_session), None).await?;
+    let (client, _) = build_client(
+        None,
+        Some(client_session),
+        crate::init::login::main_client_lock_config(),
+    )
+    .await?;
 
     client.restore_session(user_session).await?;
 

@@ -15,7 +15,7 @@ use crate::{
         FrontendAuthTypeResponse, check_homeserver_auth_type,
         session::{setup_token_background_save, try_restore_session_to_state},
         singletons::{
-            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER,
+            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, RUNTIME_HANDLE,
             VERIFICATION_RESPONSE_RECEIVER,
         },
         workers::{async_main_loop, async_worker},
@@ -137,6 +137,11 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     // and is now being reused to launch the app. Tolerate that instead of
     // panicking (it is the identical data dir). See `get_notification_item`.
     let _ = APP_DATA_DIR.set(config.app_data_dir);
+
+    // Remember the runtime the lib runs on so background push entry points
+    // (which arrive on their own short-lived runtime) can hop onto it. See
+    // `get_notification_item`.
+    let _ = RUNTIME_HANDLE.set(Handle::current());
 
     // Lib -> adapter events
     let (event_bridge, broadcast_receiver) = EventBridge::new();
@@ -417,6 +422,7 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
 
 // Re-exports
 
+pub use commands::NotificationProcessMode;
 pub use events::timeline::{PaginationDirection, TimelineKind};
 pub use init::session::FullMatrixSession;
 pub use init::singletons::{CLIENT, LOGIN_STORE_READY};

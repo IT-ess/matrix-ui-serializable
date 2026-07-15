@@ -60,7 +60,12 @@ use tokio::{sync::oneshot, time::sleep};
 /// Try to build the client from the url given by the frontend and set its singleton.
 /// Once called, the client is set and the init process can proceed (by calling check_homeserver_auth_type)
 pub async fn build_temp_client_from_homeserver_url(homeserver: String) -> crate::Result<()> {
-    let (client, client_session) = build_client(Some(homeserver), None, None).await?;
+    let (client, client_session) = build_client(
+        Some(homeserver),
+        None,
+        crate::init::login::main_client_lock_config(),
+    )
+    .await?;
     {
         let mut temp_session = TEMP_CLIENT_SESSION.lock().unwrap();
         *temp_session = Some(client_session);
@@ -469,24 +474,34 @@ pub async fn register_notifications(
     Ok(())
 }
 
-/// Resolve and decrypt a single push notification from a background process.
+/// How the process resolving a push notification relates to the app's process.
 ///
-/// This is meant to be called from a native, UI-less entry point (e.g. an iOS
-/// Notification Service Extension or an Android background service) when a
-/// silent push containing only a `room_id` and `event_id` is received, possibly
-/// while the main app is killed. It is fully self-contained: it does **not**
-/// rely on [`crate::init`], the global singletons, the sync service, the
-/// `StateUpdater` or the event bridge.
-///
-/// It restores a lightweight client from the stored session (using a distinct
-/// cross-process store lock holder so it can run alongside a live main app),
-/// then uses [`matrix_sdk_ui::notification_client::NotificationClient`] to fetch
-/// and decrypt the event, returning display-ready content for the caller to turn
-/// into an OS notification.
+/// Mirrors [`matrix_sdk_ui::notification_client::NotificationProcessSetup`]
+/// without carrying SDK types: this crate resolves the sync-service handle and
+/// the cross-process lock configuration internally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationProcessMode {
+    /// The push handler runs inside the app's own process — Android, where FCM
+    /// wakes the (possibly killed) app process itself. The notification client
+    /// is derived from the app's live client when there is one, sharing its
+    /// auth context so token refreshes can't race the app, and is cached
+    /// across pushes.
+    SingleProcess,
+    /// The push handler runs in a dedicated short-lived process — the iOS
+    /// Notification Service Extension. A standalone client with a distinct
+    /// cross-process store-lock holder is built on each call.
+    MultipleProcesses,
+}
+
+/// Resolve and decrypt a single push notification from a background entry
+/// point (the iOS Notification Service Extension, or the Android FCM service —
+/// warm or cold) when a silent push containing only a `room_id` and `event_id`
+/// is received, possibly while the main app is killed.
 ///
 /// * `session` — the serialized `FullMatrixSession` stored by the adapter (the
 ///   same string passed to `LibConfig`).
 /// * `app_data_dir` — the application data directory (same as `LibConfig`).
+/// * `mode` — see [`NotificationProcessMode`]; pick by platform.
 ///
 /// If the access/refresh tokens were rotated while resolving the notification,
 /// the returned [`FrontendNotificationResult::refreshed_session`] holds an
@@ -497,33 +512,196 @@ pub async fn get_notification_item(
     app_data_dir: std::path::PathBuf,
     room_id: OwnedRoomId,
     event_id: OwnedEventId,
+    mode: NotificationProcessMode,
 ) -> crate::Result<crate::models::notification::FrontendNotificationResult> {
-    use crate::{
-        init::session::FullMatrixSession,
-        init::singletons::APP_DATA_DIR,
-        models::notification::{
-            FrontendNotificationItem, FrontendNotificationResult, FrontendNotificationStatus,
-        },
-        room::notifications::{event_notification_body, truncate},
-    };
-    use matrix_sdk_ui::notification_client::{
-        NotificationClient, NotificationEvent, NotificationProcessSetup, NotificationStatus,
-    };
+    use crate::init::singletons::{APP_DATA_DIR, RUNTIME_HANDLE};
 
-    // The background process is fresh, so APP_DATA_DIR is unset; `build_client`
-    // waits on it. Ignore the error in case it was already set.
+    // A push-only (cold) process is fresh, so APP_DATA_DIR is unset;
+    // `build_client` waits on it. Ignore the error in case it was already set.
     let _ = APP_DATA_DIR.set(app_data_dir);
+
+    match mode {
+        NotificationProcessMode::MultipleProcesses => {
+            get_notification_item_multi_process(session, room_id, event_id).await
+        }
+        NotificationProcessMode::SingleProcess => {
+            // When the app runtime is up (warm push), run the fetch on it: the
+            // caller may be on a short-lived runtime (the Android JNI entry),
+            // and tasks the SDK spawns mid-call must outlive that caller.
+            if let Some(handle) = RUNTIME_HANDLE.get() {
+                handle
+                    .spawn(get_notification_item_single_process(
+                        session, room_id, event_id,
+                    ))
+                    .await
+                    .map_err(anyhow::Error::from)?
+            } else {
+                get_notification_item_single_process(session, room_id, event_id).await
+            }
+        }
+    }
+}
+
+/// Single-process (Android) notification resolution: one client per process.
+///
+/// Reuses the process-wide cached notification client, building it on first
+/// use — derived from the app's live client when the app is running, or as a
+/// standalone client restored from `session` in a push-only (cold) process. A
+/// standalone entry is swapped out for an app-derived one as soon as the app
+/// has started.
+async fn get_notification_item_single_process(
+    session: String,
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+) -> crate::Result<crate::models::notification::FrontendNotificationResult> {
+    use crate::init::session::FullMatrixSession;
+    use crate::init::singletons::NOTIFICATION_CLIENT;
+    use crate::models::notification::FrontendNotificationResult;
+
+    let mut cache = NOTIFICATION_CLIENT.lock().await;
+
+    let needs_rebuild = match cache.as_ref() {
+        None => true,
+        // The app started since this standalone client was built: switch to a
+        // client derived from the app's, dropping the standalone one.
+        Some(cached) => !cached.derived_from_main && CLIENT.get().is_some(),
+    };
+    if needs_rebuild {
+        // Drop any previous client (and its store handles) before opening a
+        // new one on the same stores.
+        *cache = None;
+        *cache = Some(build_cached_notification_client(&session).await?);
+    }
+    let cached = cache.as_ref().expect("just initialized above");
+
+    let status = cached
+        .notification_client
+        .get_notification(&room_id, &event_id)
+        .await
+        .map_err(anyhow::Error::from)?;
+    let status = map_notification_status(&cached.parent, status).await;
+
+    // The client persists across calls, so its tokens may have been refreshed
+    // at any point (during this fetch, between fetches, or — when derived from
+    // the app's client — by the app itself): report the current session back
+    // whenever it no longer matches the stored one the caller passed in.
+    let FullMatrixSession { client_session, .. } =
+        serde_json::from_str(&session).map_err(anyhow::Error::from)?;
+    let refreshed_session = cached
+        .parent
+        .session()
+        .map(|auth| serde_json::to_string(&FullMatrixSession::new(client_session, auth)))
+        .transpose()
+        .map_err(anyhow::Error::from)?
+        .filter(|current| *current != session);
+
+    Ok(FrontendNotificationResult {
+        status,
+        refreshed_session,
+    })
+}
+
+/// Build the notification client cached by the single-process (Android) path.
+async fn build_cached_notification_client(
+    session: &str,
+) -> crate::Result<crate::init::singletons::CachedNotificationClient> {
+    use crate::init::session::FullMatrixSession;
+    use crate::init::singletons::{CachedNotificationClient, SYNC_SERVICE};
+    use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
+    use matrix_sdk_ui::notification_client::{NotificationClient, NotificationProcessSetup};
+    use matrix_sdk_ui::sync_service::SyncService;
+
+    if let Some(client) = CLIENT.get() {
+        // Warm: derive from the app's client — shared auth context (a single
+        // token-refresh path) and coordination with the app's own encryption
+        // sync through the sync service's permit.
+        let sync_service = SYNC_SERVICE
+            .get()
+            .ok_or(anyhow!(
+                "app client exists but its sync service isn't up yet; retry on the next push"
+            ))?
+            .clone();
+        let notification_client = NotificationClient::new(
+            client.clone(),
+            NotificationProcessSetup::SingleProcess { sync_service },
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        info!("notification client derived from the running app's client");
+        Ok(CachedNotificationClient {
+            notification_client,
+            parent: client.clone(),
+            derived_from_main: true,
+        })
+    } else {
+        // Cold: the process was started just for this push; build the
+        // process's one client from the stored session. No cross-process lock:
+        // nothing else touches the stores while the app is down, and once the
+        // app starts this client is dropped (see the cache swap above). Do not
+        // set the CLIENT singleton: the app's own restore path owns it.
+        let FullMatrixSession {
+            client_session,
+            user_session,
+        } = serde_json::from_str(session).map_err(anyhow::Error::from)?;
+        let (client, _) = build_client(
+            None,
+            Some(client_session),
+            CrossProcessLockConfig::SingleProcess,
+        )
+        .await?;
+        client.restore_session(user_session).await?;
+        // Built but never started: it only exists to hand out the
+        // encryption-sync permit the notification client asks for in
+        // single-process mode.
+        let sync_service = Arc::new(
+            SyncService::builder(client.clone())
+                .build()
+                .await
+                .map_err(anyhow::Error::from)?,
+        );
+        let notification_client = NotificationClient::new(
+            client.clone(),
+            NotificationProcessSetup::SingleProcess { sync_service },
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        info!("standalone notification client built (cold push process)");
+        Ok(CachedNotificationClient {
+            notification_client,
+            parent: client,
+            derived_from_main: false,
+        })
+    }
+}
+
+/// Multi-process (iOS NSE) notification resolution: fully self-contained.
+///
+/// Restores a lightweight client from the stored session on every call (the
+/// NSE process is short-lived anyway), with a cross-process store-lock holder
+/// distinct from the main app's so both processes can safely write the shared
+/// stores. Does **not** touch the CLIENT singleton, the sync service, the
+/// `StateUpdater` or the event bridge.
+async fn get_notification_item_multi_process(
+    session: String,
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+) -> crate::Result<crate::models::notification::FrontendNotificationResult> {
+    use crate::init::session::FullMatrixSession;
+    use crate::models::notification::FrontendNotificationResult;
+    use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
+    use matrix_sdk_ui::notification_client::{NotificationClient, NotificationProcessSetup};
 
     let FullMatrixSession {
         client_session,
         user_session,
     } = serde_json::from_str(&session).map_err(anyhow::Error::from)?;
 
-    // Build a client sharing the same on-disk store as the main app, but with a
-    // distinct cross-process lock holder name. Do not set the CLIENT singleton
-    // or start any sync/worker: this client is local to this call.
-    let (client, client_session) =
-        build_client(None, Some(client_session), Some("notifications")).await?;
+    let (client, client_session) = build_client(
+        None,
+        Some(client_session),
+        CrossProcessLockConfig::multi_process("notifications"),
+    )
+    .await?;
     client.restore_session(user_session).await?;
 
     // Watch for token rotation during the notification fetch so we can hand the
@@ -539,8 +717,45 @@ pub async fn get_notification_item(
         .get_notification(&room_id, &event_id)
         .await
         .map_err(anyhow::Error::from)?;
+    let status = map_notification_status(&client, status).await;
 
-    let status = match status {
+    // Drain any session change that happened during the fetch.
+    let mut tokens_refreshed = false;
+    while let Ok(change) = session_changes.try_recv() {
+        if matches!(change, matrix_sdk::SessionChange::TokensRefreshed) {
+            tokens_refreshed = true;
+        }
+    }
+
+    let refreshed_session = if tokens_refreshed {
+        client
+            .session()
+            .map(|auth| serde_json::to_string(&FullMatrixSession::new(client_session, auth)))
+            .transpose()
+            .map_err(anyhow::Error::from)?
+    } else {
+        None
+    };
+
+    Ok(FrontendNotificationResult {
+        status,
+        refreshed_session,
+    })
+}
+
+/// Map the SDK's notification status to the serializable frontend type,
+/// fetching the sender's avatar through `client` when there is one.
+async fn map_notification_status(
+    client: &matrix_sdk::Client,
+    status: matrix_sdk_ui::notification_client::NotificationStatus,
+) -> crate::models::notification::FrontendNotificationStatus {
+    use crate::{
+        models::notification::{FrontendNotificationItem, FrontendNotificationStatus},
+        room::notifications::{event_notification_body, truncate},
+    };
+    use matrix_sdk_ui::notification_client::{NotificationEvent, NotificationStatus};
+
+    match status {
         NotificationStatus::Event(item) => {
             let item = *item;
             let sender_name = item
@@ -593,28 +808,5 @@ pub async fn get_notification_item(
         NotificationStatus::EventNotFound => FrontendNotificationStatus::NotFound,
         NotificationStatus::EventFilteredOut => FrontendNotificationStatus::FilteredOut,
         NotificationStatus::EventRedacted => FrontendNotificationStatus::Redacted,
-    };
-
-    // Drain any session change that happened during the fetch.
-    let mut tokens_refreshed = false;
-    while let Ok(change) = session_changes.try_recv() {
-        if matches!(change, matrix_sdk::SessionChange::TokensRefreshed) {
-            tokens_refreshed = true;
-        }
     }
-
-    let refreshed_session = if tokens_refreshed {
-        client
-            .session()
-            .map(|auth| serde_json::to_string(&FullMatrixSession::new(client_session, auth)))
-            .transpose()
-            .map_err(anyhow::Error::from)?
-    } else {
-        None
-    };
-
-    Ok(FrontendNotificationResult {
-        status,
-        refreshed_session,
-    })
 }
