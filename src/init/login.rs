@@ -56,10 +56,25 @@ pub(crate) async fn login_and_persist_matrix_session(
     Ok(serialized)
 }
 
+/// The store-lock configuration for the app's main client.
+///
+/// On iOS the Notification Service Extension is a genuinely separate process
+/// writing the same stores, so the main client must take part in the
+/// cross-process lock. Everywhere else (Android included: the FCM service and
+/// the JNI cold-push entry run inside the app's own process) the app is the
+/// only process touching the stores, so no cross-process lock is needed.
+pub(crate) fn main_client_lock_config() -> CrossProcessLockConfig {
+    if cfg!(target_os = "ios") {
+        CrossProcessLockConfig::multi_process("main")
+    } else {
+        CrossProcessLockConfig::SingleProcess
+    }
+}
+
 pub async fn build_client(
     homeserver_opt: Option<String>,
     client_session: Option<ClientSession>,
-    cross_process_holder: Option<&str>,
+    cross_process_lock_config: CrossProcessLockConfig,
 ) -> anyhow::Result<(Client, ClientSession)> {
     let (homeserver, db_path, passphrase, db_identifier) = match client_session {
         Some(s) => {
@@ -97,7 +112,7 @@ pub async fn build_client(
         }
     };
 
-    let mut builder = Client::builder()
+    let builder = Client::builder()
         .server_name_or_homeserver_url(homeserver.clone())
         .with_threading_support(ThreadingSupport::Enabled {
             with_subscriptions: false,
@@ -111,15 +126,14 @@ pub async fn build_client(
         })
         .with_enable_share_history_on_invite(true)
         .handle_refresh_tokens()
-        .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)));
-
-    // When the client runs in a separate process (e.g. the mobile notification
-    // service that decrypts a single push event), it must use a cross-process
-    // store lock holder name distinct from the main app's default ("main"),
-    // otherwise concurrent writes to the shared crypto store can collide.
-    if let Some(holder) = cross_process_holder {
-        builder = builder.cross_process_store_config(CrossProcessLockConfig::multi_process(holder));
-    }
+        .request_config(RequestConfig::new().timeout(std::time::Duration::from_secs(60)))
+        // Always set explicitly: the builder's implicit default is
+        // `multi_process("main")`, which is only right for the iOS main app
+        // (see `main_client_lock_config`). When the client runs in a separate
+        // process (the iOS NSE decrypting a push), it must use a holder name
+        // distinct from the main app's "main", otherwise concurrent writes to
+        // the shared crypto store can collide.
+        .cross_process_store_config(cross_process_lock_config);
 
     let client = builder.build().await?;
 

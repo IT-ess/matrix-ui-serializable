@@ -28,10 +28,12 @@ pub async fn sync(
     client: Client,
     state_updaters: Arc<Box<dyn StateUpdater>>,
 ) -> anyhow::Result<()> {
-    let sync_service = SyncService::builder(client)
-        .with_offline_mode()
-        .build()
-        .await?;
+    let sync_service = Arc::new(
+        SyncService::builder(client)
+            .with_offline_mode()
+            .build()
+            .await?,
+    );
 
     // Start the sync service
     sync_service.start().await;

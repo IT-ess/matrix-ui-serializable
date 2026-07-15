@@ -10,7 +10,7 @@ use matrix_sdk::{
     Client, RoomMemberships,
     ruma::{OwnedRoomId, OwnedUserId},
 };
-use matrix_sdk_ui::sync_service::SyncService;
+use matrix_sdk_ui::{notification_client::NotificationClient, sync_service::SyncService};
 use tokio::{
     sync::{
         broadcast,
@@ -33,8 +33,35 @@ use crate::{
 /// Currently there is only one, but it can be cloned if we need more concurrent senders.
 pub static REQUEST_SENDER: OnceLock<UnboundedSender<MatrixRequest>> = OnceLock::new();
 
-/// The singleton sync service.
-pub static SYNC_SERVICE: OnceLock<SyncService> = OnceLock::new();
+/// The singleton sync service. `Arc`'d because
+/// [`matrix_sdk_ui::notification_client::NotificationProcessSetup::SingleProcess`]
+/// needs a shared handle to it.
+pub static SYNC_SERVICE: OnceLock<Arc<SyncService>> = OnceLock::new();
+
+/// Handle to the tokio runtime [`crate::init`] ran on. Background push entry
+/// points (the Android JNI silent-push path) run on their own short-lived
+/// runtime; anything touching [`CLIENT`] must be spawned onto this runtime
+/// instead, so tasks the SDK spawns mid-call survive the caller's runtime.
+/// Unset when the app never started in this process (cold push process).
+pub static RUNTIME_HANDLE: OnceLock<tokio::runtime::Handle> = OnceLock::new();
+
+/// A notification client kept alive across push notifications, so repeated
+/// pushes don't rebuild a client (and reopen the stores) each time.
+pub(crate) struct CachedNotificationClient {
+    pub(crate) notification_client: NotificationClient,
+    /// The client the notification client was derived from; used for follow-up
+    /// requests (e.g. fetching the sender's avatar).
+    pub(crate) parent: Client,
+    /// `true` when `parent` is the global [`CLIENT`]. `false` for a standalone
+    /// client built in a push-only (cold) process; such a cache entry is
+    /// replaced as soon as [`CLIENT`] exists.
+    pub(crate) derived_from_main: bool,
+}
+
+/// Cache for the single-process notification path. The mutex is held across
+/// the whole fetch, which also serializes concurrent pushes.
+pub(crate) static NOTIFICATION_CLIENT: tokio::sync::Mutex<Option<CachedNotificationClient>> =
+    tokio::sync::Mutex::const_new(None);
 
 /// Flag set by `handle_rooms_loading_state` when all rooms are loaded.
 /// if rooms have been synced or not.
