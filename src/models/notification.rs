@@ -59,6 +59,10 @@ pub struct FrontendNotificationItem {
     pub sender_display_name: Option<String>,
     /// Sender's avatar buffer, if any.
     pub sender_avatar: Option<Vec<u8>>,
+    /// Room's avatar buffer, if any. Only fetched for group rooms (`is_dm ==
+    /// false`), where the notification brands as the room rather than the
+    /// sender; DM notifications use `sender_avatar`.
+    pub room_avatar: Option<Vec<u8>>,
     /// Computed display name of the room.
     pub room_display_name: String,
     /// MXC URL of the room's avatar, if any.

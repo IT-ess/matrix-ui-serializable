@@ -743,8 +743,28 @@ async fn get_notification_item_multi_process(
     })
 }
 
+/// Fetch avatar bytes from an MXC URL through `client`. Errors are swallowed
+/// (`None`): an unavailable avatar must not fail the notification.
+async fn fetch_avatar_content(
+    client: &matrix_sdk::Client,
+    mxc_uri: Option<String>,
+) -> Option<Vec<u8>> {
+    client
+        .media()
+        .get_media_content(
+            &MediaRequestParameters {
+                source: MediaSource::Plain(OwnedMxcUri::from(mxc_uri?)),
+                format: matrix_sdk::media::MediaFormat::File,
+            },
+            true,
+        )
+        .await
+        .ok()
+}
+
 /// Map the SDK's notification status to the serializable frontend type,
-/// fetching the sender's avatar through `client` when there is one.
+/// fetching the sender's avatar (and, for group rooms, the room's avatar)
+/// through `client` when there is one.
 async fn map_notification_status(
     client: &matrix_sdk::Client,
     status: matrix_sdk_ui::notification_client::NotificationStatus,
@@ -776,20 +796,13 @@ async fn map_notification_status(
                 format!("{sender_name} in {}", item.room_computed_display_name)
             };
 
-            let sender_avatar = if let Some(mxc_uri) = item.sender_avatar_url {
-                client
-                    .media()
-                    .get_media_content(
-                        &MediaRequestParameters {
-                            source: MediaSource::Plain(OwnedMxcUri::from(mxc_uri)),
-                            format: matrix_sdk::media::MediaFormat::File,
-                        },
-                        true,
-                    )
-                    .await
-                    .ok() // We ignore the error
-            } else {
+            let sender_avatar = fetch_avatar_content(client, item.sender_avatar_url).await;
+            // Group-room notifications brand as the room (room name + room
+            // avatar), so fetch its avatar too; DMs render the sender's only.
+            let room_avatar = if item.is_direct_message_room {
                 None
+            } else {
+                fetch_avatar_content(client, item.room_avatar_url.clone()).await
             };
 
             FrontendNotificationStatus::Event(FrontendNotificationItem {
@@ -797,6 +810,7 @@ async fn map_notification_status(
                 body,
                 sender_display_name: item.sender_display_name,
                 sender_avatar,
+                room_avatar,
                 room_display_name: item.room_computed_display_name,
                 room_avatar_url: item.room_avatar_url,
                 is_dm: item.is_direct_message_room,
