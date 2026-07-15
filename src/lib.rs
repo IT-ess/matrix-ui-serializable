@@ -444,7 +444,7 @@ pub use matrix_sdk::encryption::recovery::RecoveryState;
 pub use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
 pub use matrix_sdk::ruma::serde::base64::{Base64, Standard, UrlSafe};
 pub use matrix_sdk::ruma::{
-    OwnedDeviceId, OwnedMxcUri, OwnedRoomId, OwnedUserId, UInt,
+    OwnedDeviceId, OwnedMxcUri, OwnedRoomId, OwnedUserId, RoomId, UInt,
     events::room::{
         EncryptedFile, EncryptedFileHashes, EncryptedFileInfo, MediaSource, V2EncryptedFileInfo,
     },

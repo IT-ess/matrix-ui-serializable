@@ -392,12 +392,23 @@ impl RoomsList {
                     unread_mentions,
                 } => {
                     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
+                        let old_count = room.num_unread_messages;
                         room.num_unread_messages = match unread_messages {
                             UnreadMessageCount::_Unknown => 0,
                             UnreadMessageCount::Known(count) => count,
                         };
                         room.num_unread_mentions = unread_mentions;
                         room.is_marked_unread = is_marked_unread;
+                        // The room just went from unread to fully read (a receipt
+                        // from this or another device): let the embedder dismiss
+                        // any OS notification it posted for it.
+                        if old_count > 0 && room.num_unread_messages == 0 && !is_marked_unread {
+                            if let Err(e) = self.state_updaters.room_fully_read(&room_id) {
+                                error!(
+                                    "Failed to notify embedder that room {room_id} was read: {e}"
+                                );
+                            }
+                        }
                     } else {
                         warn!(
                             "Warning: couldn't find room {} to update unread messages count",
