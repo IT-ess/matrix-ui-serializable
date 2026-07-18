@@ -47,6 +47,12 @@ pub enum EmitEvent {
     ResetCrossSigngingUrl(String),
     NewlyCreatedRoomId(OwnedRoomId),
     MatrixUriIntent(MatrixUriIntent),
+    /// A joined room has no unread messages left (it was read on this or
+    /// another device): the embedder can dismiss any OS notification it posted
+    /// for that room. Also emitted for every already-read room when the rooms
+    /// list is first populated, so stale notifications for rooms read while
+    /// the app was down get dismissed too — dismissals must be idempotent.
+    RoomFullyRead(OwnedRoomId),
 }
 
 #[derive(Debug, Clone, Serialize)]

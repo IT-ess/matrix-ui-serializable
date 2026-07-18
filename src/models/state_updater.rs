@@ -1,7 +1,7 @@
 use matrix_sdk::{
     AuthSession,
     encryption::recovery::RecoveryState,
-    ruma::{OwnedMxcUri, OwnedUserId, RoomId},
+    ruma::{OwnedMxcUri, OwnedUserId},
 };
 
 use crate::{
@@ -42,10 +42,4 @@ pub trait StateUpdaterFunctions {
     async fn persist_refreshed_session(&self, refreshed_session: AuthSession)
     -> anyhow::Result<()>;
     async fn persist_login_session(&self, session: String) -> anyhow::Result<()>;
-    /// Called when a joined room's unread count drops to zero (the room was read
-    /// on this or another device). Lets the embedder dismiss any OS notification
-    /// it posted for that room. Defaults to a no-op.
-    fn room_fully_read(&self, _room_id: &RoomId) -> anyhow::Result<()> {
-        Ok(())
-    }
 }

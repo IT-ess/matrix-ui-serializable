@@ -23,9 +23,9 @@ use tokio::{
 
 use crate::{
     events::timeline::TimelineKind,
-    init::singletons::{ALL_ROOMS_LOADED, UIUpdateMessage, broadcast_event},
+    init::singletons::{ALL_ROOMS_LOADED, UIUpdateMessage, broadcast_event, get_event_bridge},
     models::{
-        events::{ToastNotificationRequest, ToastNotificationVariant},
+        events::{EmitEvent, ToastNotificationRequest, ToastNotificationVariant},
         room_display_name::FrontendRoomDisplayName,
         state_updater::StateUpdater,
     },
@@ -127,6 +127,15 @@ static PENDING_ROOM_UPDATES: SegQueue<RoomsListUpdate> = SegQueue::new();
 pub fn enqueue_rooms_list_update(update: RoomsListUpdate) {
     PENDING_ROOM_UPDATES.push(update);
     broadcast_event(UIUpdateMessage::RefreshUI);
+}
+
+/// Tell the embedder a joined room has no unread messages left so it can
+/// dismiss any OS notification it posted for it (see
+/// [`EmitEvent::RoomFullyRead`]). Fire-and-forget; dismissals are idempotent.
+fn notify_room_fully_read(room_id: &OwnedRoomId) {
+    if let Ok(bridge) = get_event_bridge() {
+        bridge.emit(EmitEvent::RoomFullyRead(room_id.clone()));
+    }
 }
 
 /// UI-related info about a joined room.
@@ -343,6 +352,14 @@ impl RoomsList {
                     let should_display = (self.display_filter)(&joined_room);
                     let is_direct = joined_room.is_direct;
 
+                    // A room entering the list already fully read may have been
+                    // read on another device while this app was down: signal it
+                    // so any stale OS notification gets dismissed (the
+                    // transition check below can't fire for those rooms).
+                    if joined_room.num_unread_messages == 0 && !joined_room.is_marked_unread {
+                        notify_room_fully_read(&room_id);
+                    }
+
                     let replaced = self.all_joined_rooms.insert(room_id.clone(), joined_room);
 
                     if let Some(_old_room) = replaced {
@@ -400,14 +417,9 @@ impl RoomsList {
                         room.num_unread_mentions = unread_mentions;
                         room.is_marked_unread = is_marked_unread;
                         // The room just went from unread to fully read (a receipt
-                        // from this or another device): let the embedder dismiss
-                        // any OS notification it posted for it.
+                        // from this or another device).
                         if old_count > 0 && room.num_unread_messages == 0 && !is_marked_unread {
-                            if let Err(e) = self.state_updaters.room_fully_read(&room_id) {
-                                error!(
-                                    "Failed to notify embedder that room {room_id} was read: {e}"
-                                );
-                            }
+                            notify_room_fully_read(&room_id);
                         }
                     } else {
                         warn!(

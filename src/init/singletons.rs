@@ -108,6 +108,24 @@ pub struct GlobalBroadcaster {
 
 pub static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Set [`APP_DATA_DIR`], tolerating a repeated set of the *same* path (the
+/// Android push entry point and `init()` both supply it, in either order) but
+/// failing loudly on a conflicting one: silently keeping the first path would
+/// open the sqlite/crypto stores under the wrong directory with no diagnostics.
+pub(crate) fn set_or_verify_app_data_dir(path: PathBuf) -> anyhow::Result<()> {
+    if let Err(rejected) = APP_DATA_DIR.set(path) {
+        let existing = APP_DATA_DIR.get().expect("APP_DATA_DIR set() just failed");
+        if *existing != rejected {
+            return Err(anyhow!(
+                "APP_DATA_DIR mismatch: already set to {} but now given {}",
+                existing.display(),
+                rejected.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl GlobalBroadcaster {
     fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
