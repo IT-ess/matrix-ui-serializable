@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::{
     init::{
         login::build_client,
-        singletons::{CLIENT, HAS_SESSION_STORED},
+        singletons::{CLIENT, HAS_SESSION_STORED, NOTIFICATION_CLIENT},
     },
     models::{
         events::{ToastNotificationRequest, ToastNotificationVariant},
@@ -120,20 +120,34 @@ impl FullMatrixSession {
     }
 }
 
-pub async fn restore_client_from_session(session: FullMatrixSession) -> anyhow::Result<Client> {
+/// Build a client from a stored session and restore that session on it, with
+/// the given store-lock configuration. Shared by the app's own restore path and
+/// the background push-notification paths; does not touch any singleton.
+pub(crate) async fn restore_client(
+    session: FullMatrixSession,
+    lock_config: matrix_sdk::cross_process_lock::CrossProcessLockConfig,
+) -> anyhow::Result<(Client, ClientSession)> {
     let FullMatrixSession {
         client_session,
         user_session,
     } = session;
 
-    let (client, _) = build_client(
-        None,
-        Some(client_session),
-        crate::init::login::main_client_lock_config(),
-    )
-    .await?;
+    let (client, client_session) = build_client(None, Some(client_session), lock_config).await?;
 
     client.restore_session(user_session).await?;
+
+    Ok((client, client_session))
+}
+
+pub async fn restore_client_from_session(session: FullMatrixSession) -> anyhow::Result<Client> {
+    // Drop any standalone notification client a cold push built before the app
+    // started. The cache mutex spans a whole notification fetch, so this also
+    // waits for an in-flight fetch to finish and closes its store handles
+    // before the app's client reopens the same stores.
+    *NOTIFICATION_CLIENT.lock().await = None;
+
+    let (client, _) =
+        restore_client(session, crate::init::login::main_client_lock_config()).await?;
 
     CLIENT
         .set(client.clone())

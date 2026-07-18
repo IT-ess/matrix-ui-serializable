@@ -15,7 +15,7 @@ use crate::{
         FrontendAuthTypeResponse, check_homeserver_auth_type,
         session::{setup_token_background_save, try_restore_session_to_state},
         singletons::{
-            APP_DATA_DIR, CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, RUNTIME_HANDLE,
+            CURRENT_USER_ID, EVENT_BRIDGE, REQUEST_SENDER, RUNTIME_HANDLE,
             VERIFICATION_RESPONSE_RECEIVER,
         },
         workers::{async_main_loop, async_worker},
@@ -133,10 +133,11 @@ impl LibConfig {
 /// This will start the workers and return a `Receiver` to forward outgoing events.
 pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
     // On Android the silent-push (cold) notification path may already have set
-    // `APP_DATA_DIR` to the same value if this process previously handled a push
-    // and is now being reused to launch the app. Tolerate that instead of
-    // panicking (it is the identical data dir). See `get_notification_item`.
-    let _ = APP_DATA_DIR.set(config.app_data_dir);
+    // `APP_DATA_DIR` if this process previously handled a push and is now being
+    // reused to launch the app. Tolerate a repeated set of the same dir, but
+    // fail loudly on a conflicting one. See `get_notification_item`.
+    init::singletons::set_or_verify_app_data_dir(config.app_data_dir)
+        .expect("init() was given a different app data dir than the push entry point");
 
     // Remember the runtime the lib runs on so background push entry points
     // (which arrive on their own short-lived runtime) can hop onto it. See

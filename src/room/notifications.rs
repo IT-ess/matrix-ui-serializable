@@ -55,6 +55,12 @@ pub fn process_toast_notifications() {
 //
 
 /// For user_language: The preferred language for receiving notifications (e.g. ‘en’ or ‘en-US’).
+///
+/// On iOS the pusher's fallback alert (shown verbatim by the OS whenever the
+/// Notification Service Extension fails, times out or is not configured) uses
+/// the localization key `SINGLE_UNREAD`: the embedding app **must** define it
+/// in its `Localizable.strings`, otherwise users see the raw key as the
+/// notification text.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn register_mobile_push_notifications(
     client: &Client,
@@ -64,7 +70,7 @@ pub async fn register_mobile_push_notifications(
     ios_sygnal_url: Url,
     app_id: String,
 ) -> anyhow::Result<()> {
-    let http_pusher = get_http_pusher(user_language.clone(), android_sygnal_url, ios_sygnal_url);
+    let http_pusher = get_http_pusher(android_sygnal_url, ios_sygnal_url);
     let pusher_ids = PusherIds::new(token, app_id);
 
     let device_display_name = client
@@ -92,7 +98,6 @@ pub async fn register_mobile_push_notifications(
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn get_http_pusher(
-    user_language: String,
     android_sygnal_url: Url,
     ios_sygnal_url: Url,
 ) -> matrix_sdk::ruma::push::HttpPusherData {
@@ -109,6 +114,9 @@ fn get_http_pusher(
     // For iOS we define here the content of the notification.
     // For android, it is defined server-side.
     if cfg!(target_os = "ios") {
+        // Fallback alert when the NSE doesn't rewrite the notification: the
+        // `SINGLE_UNREAD` key must exist in the app's Localizable.strings (see
+        // `register_mobile_push_notifications`).
         let default_payload = json!( {
           "aps": {
               "mutable-content": 1,
@@ -306,7 +314,7 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
                     format!("{sender_name} sent a verification request.")
                 }
                 _ => {
-                    format!("[Unknown message type: {:?}]", &message.msgtype)
+                    format!("[Unknown message type: {:?}]", message.msgtype)
                 }
             };
             Some(body)

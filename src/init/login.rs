@@ -1,9 +1,9 @@
 use anyhow::anyhow;
+use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
 use matrix_sdk::{
     Client, ThreadingSupport, config::RequestConfig, encryption::EncryptionSettings,
     sliding_sync::VersionBuilder,
 };
-use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
 
 use rand::{RngExt, distr::Alphanumeric, rng};
 
@@ -63,6 +63,12 @@ pub(crate) async fn login_and_persist_matrix_session(
 /// cross-process lock. Everywhere else (Android included: the FCM service and
 /// the JNI cold-push entry run inside the app's own process) the app is the
 /// only process touching the stores, so no cross-process lock is needed.
+///
+/// **Constraint**: because the main client only participates in the lock on
+/// iOS, [`crate::commands::NotificationProcessMode::MultipleProcesses`] is only
+/// sound on iOS. An adapter that runs its push handler in a genuinely separate
+/// process on another platform (e.g. an Android `:push` process) would write
+/// the shared crypto store unsynchronized — that setup is unsupported.
 pub(crate) fn main_client_lock_config() -> CrossProcessLockConfig {
     if cfg!(target_os = "ios") {
         CrossProcessLockConfig::multi_process("main")
@@ -112,6 +118,11 @@ pub async fn build_client(
         }
     };
 
+    let refresh_lock_holder = match &cross_process_lock_config {
+        CrossProcessLockConfig::MultiProcess { holder_name } => Some(holder_name.clone()),
+        _ => None,
+    };
+
     let builder = Client::builder()
         .server_name_or_homeserver_url(homeserver.clone())
         .with_threading_support(ThreadingSupport::Enabled {
@@ -136,6 +147,18 @@ pub async fn build_client(
         .cross_process_store_config(cross_process_lock_config);
 
     let client = builder.build().await?;
+
+    // When several processes share these stores (iOS app + NSE), OAuth token
+    // refreshes must also be coordinated: without this lock each process
+    // refreshes independently, and with rotating refresh tokens (MAS default)
+    // one process's refresh invalidates the other's token, forcing a logout.
+    // Deferred by the SDK until session restore; no-op for password auth.
+    if let Some(holder_name) = refresh_lock_holder {
+        client
+            .oauth()
+            .enable_cross_process_refresh_lock(holder_name)
+            .await?;
+    }
 
     add_event_handlers(&client);
 
