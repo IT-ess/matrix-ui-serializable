@@ -20,7 +20,7 @@ use crate::{
     user::user_power_level::UserPowerLevels,
 };
 use matrix_sdk::{
-    RoomDisplayName, RoomHero, RoomState,
+    RoomDisplayName, RoomHeroWithProfile, RoomState,
     event_handler::EventHandlerDropGuard,
     ruma::{
         MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedUserId,
@@ -84,7 +84,7 @@ pub struct RoomListServiceRoomInfo {
     num_unread_mentions: u64,
     display_name: Option<RoomDisplayName>,
     room_avatar: Option<OwnedMxcUri>,
-    heroes: Vec<RoomHero>,
+    heroes: Vec<RoomHeroWithProfile>,
     room: matrix_sdk::Room,
 }
 
@@ -117,7 +117,7 @@ impl RoomListServiceRoomInfo {
             num_unread_mentions: room.num_unread_mentions(),
             display_name: display_name.ok(),
             room_avatar: room.avatar_url(),
-            heroes: room.heroes(),
+            heroes: room.heroes().await,
             room,
         }
     }
@@ -297,7 +297,7 @@ pub async fn add_new_room(
         is_direct: new_room.is_direct,
         is_tombstoned: new_room.is_tombstoned,
         direct_user_id: direct_user_id_option.and_then(|id| id.into_user_id()),
-        heroes: new_room.heroes.clone(),
+        heroes: new_room.heroes.iter().map(Into::into).collect(),
     }));
     Ok(())
 }

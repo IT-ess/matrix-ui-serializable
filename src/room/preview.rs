@@ -249,7 +249,7 @@ impl From<RoomPreview> for SerializableRoomPreview {
             is_world_readable,
             state,
             is_direct,
-            heroes,
+            heroes: heroes.map(|u| u.iter().map(|s| s.into()).collect()),
         }
     }
 }
