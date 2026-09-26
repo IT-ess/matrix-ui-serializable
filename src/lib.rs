@@ -278,13 +278,9 @@ pub fn init(mut config: LibConfig) -> broadcast::Receiver<EmitEvent> {
             .set(client.user_id().unwrap().to_owned())
             .expect("Couldn't set CURRENT_USER_ID singleton");
 
-        let user_avatar = client.account().get_avatar_url().await.map_or(None, |a| a);
+        let user_avatar = client.account().get_avatar_url().await.unwrap_or(None);
 
-        let user_display_name = client
-            .account()
-            .get_display_name()
-            .await
-            .map_or(None, |n| n);
+        let user_display_name = client.account().get_display_name().await.unwrap_or(None);
 
         let device_name = client
             .encryption()

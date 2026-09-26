@@ -124,7 +124,9 @@ pub async fn sync(
                         enqueue_rooms_list_update(RoomsListUpdate::RoomOrderUpdate(
                             VecDiff::Append { values: room_ids },
                         ));
-                        room_list_service.subscribe_to_rooms(&room_id_refs).await;
+                        room_list_service
+                            .set_room_subscriptions(&room_id_refs)
+                            .await;
                         all_known_rooms.extend(new_room_infos);
                     }
                 }
@@ -297,8 +299,7 @@ async fn optimize_remove_then_add_into_update(
     room_list_service: &RoomListService,
     current_user_id: &Option<OwnedUserId>,
 ) -> anyhow::Result<()> {
-    let next_diff_was_handled: bool;
-    match peekable_diffs.peek() {
+    let next_diff_was_handled = match peekable_diffs.peek() {
         Some(VectorDiff::Insert {
             index: insert_index,
             value: new_room,
@@ -316,7 +317,7 @@ async fn optimize_remove_then_add_into_update(
                 value: new_room.room_id.clone(),
             }));
             all_known_rooms.insert(*insert_index, new_room);
-            next_diff_was_handled = true;
+            true
         }
         Some(VectorDiff::PushFront { value: new_room }) if room.room_id == new_room.room_id() => {
             trace!(
@@ -331,7 +332,7 @@ async fn optimize_remove_then_add_into_update(
                 value: new_room.room_id.clone(),
             }));
             all_known_rooms.push_front(new_room);
-            next_diff_was_handled = true;
+            true
         }
         Some(VectorDiff::PushBack { value: new_room }) if room.room_id == new_room.room_id() => {
             trace!(
@@ -346,10 +347,10 @@ async fn optimize_remove_then_add_into_update(
                 value: new_room.room_id.clone(),
             }));
             all_known_rooms.push_back(new_room);
-            next_diff_was_handled = true;
+            true
         }
-        _ => next_diff_was_handled = false,
-    }
+        _ => false,
+    };
     if next_diff_was_handled {
         peekable_diffs.next(); // consume the next diff
     } else {

@@ -213,7 +213,7 @@ pub async fn add_new_room(
     // This ensures we will properly receive all of its states and latest event.
     if subscribe {
         room_list_service
-            .subscribe_to_rooms(&[&new_room.room_id])
+            .set_room_subscriptions(&[&new_room.room_id])
             .await;
     }
 

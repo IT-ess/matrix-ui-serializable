@@ -1,4 +1,4 @@
-use matrix_sdk::ruma::{OwnedEventId, OwnedUserId};
+use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk_ui::timeline::ThreadSummary;
 use serde::Serialize;
 
@@ -17,8 +17,6 @@ pub fn get_frontend_thread_summary(thread_summary: ThreadSummary) -> Option<Fron
                 event_formatted_summary: preview,
                 sender_id: e.sender,
                 num_replies: thread_summary.num_replies,
-                private_read_receipt_event_id: thread_summary.private_read_receipt_event_id,
-                public_read_receipt_event_id: thread_summary.public_read_receipt_event_id,
             })
         }
         // TODO: handle other states
@@ -33,6 +31,4 @@ pub struct FrontendThreadSummary {
     event_formatted_summary: String,
     sender_id: OwnedUserId,
     num_replies: u32,
-    private_read_receipt_event_id: Option<OwnedEventId>,
-    public_read_receipt_event_id: Option<OwnedEventId>,
 }

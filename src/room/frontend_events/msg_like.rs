@@ -12,7 +12,7 @@ use matrix_sdk::ruma::{
         sticker::{StickerEventContent, StickerMediaSource},
     },
 };
-use matrix_sdk_ui::timeline::{ReactionInfo, ReactionStatus, ReactionsByKeyBySender};
+use matrix_sdk_ui::timeline::{EventSendState, ReactionInfo, ReactionsByKeyBySender};
 use serde::{Serialize, Serializer};
 use url::Url;
 
@@ -127,14 +127,14 @@ impl Serialize for SerializableReactions {
 #[derive(Clone, Debug)]
 pub struct SerializableReactionInfo {
     pub timestamp: MilliSecondsSinceUnixEpoch,
-    pub status: SerializableReactionStatus,
+    pub send_state: Option<SerializableEventSendState>,
 }
 
 impl From<&ReactionInfo> for SerializableReactionInfo {
     fn from(info: &ReactionInfo) -> Self {
         Self {
             timestamp: info.timestamp,
-            status: (&info.status).into(),
+            send_state: info.send_state.as_ref().map(Into::into),
         }
     }
 }
@@ -148,37 +148,37 @@ impl Serialize for SerializableReactionInfo {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;
         map.serialize_entry("timestamp", &self.timestamp)?;
-        map.serialize_entry("status", &self.status)?;
+        map.serialize_entry("sendState", &self.send_state)?;
         map.end()
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum SerializableReactionStatus {
-    LocalToLocal,
-    LocalToRemote,
-    RemoteToRemote,
+pub enum SerializableEventSendState {
+    NotSentYet,
+    SendingFailed,
+    Sent,
 }
 
-impl From<&ReactionStatus> for SerializableReactionStatus {
-    fn from(status: &ReactionStatus) -> Self {
+impl From<&EventSendState> for SerializableEventSendState {
+    fn from(status: &EventSendState) -> Self {
         match status {
-            ReactionStatus::LocalToLocal(_) => Self::LocalToLocal,
-            ReactionStatus::LocalToRemote(_) => Self::LocalToRemote,
-            ReactionStatus::RemoteToRemote(_) => Self::RemoteToRemote,
+            EventSendState::NotSentYet { .. } => Self::NotSentYet,
+            EventSendState::SendingFailed { .. } => Self::SendingFailed,
+            EventSendState::Sent { .. } => Self::Sent,
         }
     }
 }
 
-impl Serialize for SerializableReactionStatus {
+impl Serialize for SerializableEventSendState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let status_str = match self {
-            Self::LocalToLocal => "localToLocal",
-            Self::LocalToRemote => "localToRemote",
-            Self::RemoteToRemote => "remoteToRemote",
+            Self::NotSentYet => "notSentYet",
+            Self::SendingFailed => "sendingFailed",
+            Self::Sent => "sent",
         };
         serializer.serialize_str(status_str)
     }
