@@ -310,7 +310,7 @@ impl RoomScreen {
 
     /// Invoke this when this timeline is being shown,
     /// e.g., when the user navigates to this timeline.
-    pub fn show_timeline(&mut self) {
+    pub async fn show_timeline(&mut self) {
         let kind = self
             .timeline_kind
             .clone()
@@ -341,8 +341,12 @@ impl RoomScreen {
                         thread_root_event_id: thread_root.clone(),
                         sender: tx,
                     });
-                    match futures::executor::block_on(rx) {
-                        Ok(_) => take_timeline_endpoints(&kind).expect("msg"),
+                    // Must be awaited, not blocked on: this runs on a runtime worker,
+                    // and blocking it can starve the async worker that builds the timeline.
+                    match rx.await {
+                        Ok(_) => take_timeline_endpoints(&kind).expect(
+                            "BUG: thread timeline endpoints missing after creation",
+                        ),
                         Err(e) => {
                             warn!("Timeline hasn't been created. {e}");
                             return;
@@ -486,7 +490,7 @@ impl RoomScreen {
     }
 
     /// Sets this `RoomScreen` widget to display the timeline for the given room.
-    pub fn set_displayed_room(
+    pub async fn set_displayed_room(
         &mut self,
         room_id: OwnedRoomId,
         room_name: String,
@@ -518,7 +522,7 @@ impl RoomScreen {
         self.timeline_kind = Some(timeline_kind.clone());
         self.room_name = room_name_or_id(room_name.into(), &room_id);
 
-        self.show_timeline();
+        self.show_timeline().await;
     }
 }
 
