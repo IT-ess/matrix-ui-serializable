@@ -759,7 +759,12 @@ impl RoomsList {
         Handle::current().spawn(async move {
             let mut room_screen =
                 RoomScreen::new(updaters, Some(updated_current_active_timeline), room_name);
-            room_screen.show_timeline();
+            // Stop early if this room is replaced while its timeline is still being built
+            // (e.g. a thread timeline), so a stale screen never overwrites the frontend state.
+            tokio::select! {
+                _ = room_screen.show_timeline() => {}
+                _ = &mut rx => return,
+            }
 
             loop {
                 tokio::select! {
