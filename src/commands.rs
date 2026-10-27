@@ -450,6 +450,19 @@ pub async fn get_matrix_to_permalink_for_room(room_id: OwnedRoomId) -> anyhow::R
     room.matrix_to_permalink().await.map_err(Into::into)
 }
 
+/// Report an event as inappropriate to the homeserver's administrator.
+/// The room must be joined.
+pub async fn report_content(
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+    reason: Option<String>,
+) -> anyhow::Result<()> {
+    let kind = TimelineKind::MainRoom { room_id };
+    let timeline = get_timeline(&kind).ok_or(anyhow!("Cannot get timeline"))?;
+    timeline.room().report_content(event_id, reason).await?;
+    Ok(())
+}
+
 pub async fn register_notifications(
     _token: String,
     _user_language: String,
